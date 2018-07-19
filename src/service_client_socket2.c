@@ -12,7 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define buffer_size 2048
+#define buffer_size 1024
 // Status codes for messages which are commonly sent
 char status200[] = "HTTP/1.1 200 OK\nContent-Length: %d\n\n";
 char error500[] = "HTTP/1.1 500 Internal Server Error\nContent-Length: %d\n\n";
@@ -101,8 +101,8 @@ int list_directory(DIR *directory, char *resource_dir, struct stat file_stats, c
 	strcpy(send_dir, "<p><b>DIRECTORIES</b></p><p>");
 	strcpy(send_files, "<p><b>FILES</b></p><p>");
 	char httpline[200];
-	char file_name[200];
-	char file_path[201];
+	char file_name[100];
+	char file_path[101];
 	// Read items in directory
 	while ((entry = readdir(directory)) != NULL) {
 		// Format the link correctly
@@ -124,14 +124,16 @@ int list_directory(DIR *directory, char *resource_dir, struct stat file_stats, c
 				*ptr = '\0';
 				if ((ptr = strrchr(file_name, '/')) != NULL) {
 					*ptr = '\0';
-				} 
+				} else {
+					perror("strrchr1");
+					return -1;
+				}
 			} else {
-				perror("strrchr");
+				perror("strrchr2");
 				return -1;
 			}
 		}
 		// Create HTML link to file/directory
-		printf("%s\n", file_name);
 		sprintf(httpline, "<a href=\"%s\">%s</a><br>", file_name,
 				entry->d_name);
 		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0) { // Directory and not "."

@@ -12,7 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define buffer_size 2048
+#define buffer_size 1024
 // Status codes for messages which are commonly sent
 char status200[] = "HTTP/1.1 200 OK\nContent-Length: %d\n\n";
 char error500[] = "HTTP/1.1 500 Internal Server Error\nContent-Length: %d\n\n";
@@ -91,75 +91,6 @@ int send_file(const int s, char *header, char *file, long length) {
 	return 0;
 }
 
-int list_directory(DIR *directory, char *resource_dir, struct stat file_stats, const int s) {
-	// Directory info
-	struct dirent *entry;
-
-	char *send_dir = malloc(buffer_size);
-	char *send_files = malloc(buffer_size);
-	// Format the beginning of the HTML
-	strcpy(send_dir, "<p><b>DIRECTORIES</b></p><p>");
-	strcpy(send_files, "<p><b>FILES</b></p><p>");
-	char httpline[200];
-	char file_name[200];
-	char file_path[201];
-	// Read items in directory
-	while ((entry = readdir(directory)) != NULL) {
-		// Format the link correctly
-		if (strcmp(resource_dir, "/") != 0) {
-			strcpy(file_name, resource_dir);
-			strcat(file_name, "/");
-		} else {
-			strcpy(file_name, "/");
-		}
-		strcat(file_name, entry->d_name);
-		strcpy(file_path, ".");
-		strcat(file_path, file_name);
-		// Make .. directories link to the directory above, e.g.:
-		// '../src/..' --> '..'
-		if (strcmp(entry->d_name, "..") == 0
-				&& strlen(file_name) > 2) { // Don't link to outside the top level
-			char *ptr = NULL;
-			if ((ptr = strrchr(file_name, '/')) != NULL) {
-				*ptr = '\0';
-				if ((ptr = strrchr(file_name, '/')) != NULL) {
-					*ptr = '\0';
-				} 
-			} else {
-				perror("strrchr");
-				return -1;
-			}
-		}
-		// Create HTML link to file/directory
-		printf("%s\n", file_name);
-		sprintf(httpline, "<a href=\"%s\">%s</a><br>", file_name,
-				entry->d_name);
-		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0) { // Directory and not "."
-			strcat(send_dir, httpline);
-		} else if (entry->d_type == DT_REG && stat(file_name, &file_stats) == 0 // File
-				&& !(file_stats.st_mode & S_IXUSR) // Not executable
-				&& (entry->d_name[0] != '.')) { // Doesn't start with "."
-			strcat(send_files, httpline);
-		}
-	}
-	// Send data
-	strcat(send_dir, "</p>");
-	strcat(send_files, "</p>");
-	char *send = malloc(strlen(send_dir) + strlen(send_files) + 1);
-	strcpy(send, send_dir);
-	strcat(send, send_files);
-	if (send_response(s, status200, send) != 0) {
-		perror("send_response");
-		return -1;
-	}
-	free(resource_dir);
-	free(send_dir);
-	free(send_files);
-	free(send);
-	closedir(directory);
-	return 0;
-}
-
 int service_client_socket(const int s, const char * const tag) {
 	char buffer[buffer_size];
 	size_t bytes;
@@ -171,6 +102,7 @@ int service_client_socket(const int s, const char * const tag) {
 	long length;
 	// Directory info
 	DIR *directory;
+	struct dirent *entry;
 	// File info - Find if file is executable
 	struct stat file_stats;
 	// Current working directory
@@ -241,9 +173,67 @@ int service_client_socket(const int s, const char * const tag) {
 			strcat(resource_dir, resource);
 			// Open the directory resource_dir, e.g. ./testdir
 			if ((directory = opendir(resource_dir)) != NULL) {
-				if (list_directory(directory, resource_dir, file_stats, s) != 0) {
-					perror("list_directory");
+				char *send_dir = malloc(buffer_size);
+				char *send_files = malloc(buffer_size);
+				// Format the beginning of the HTML
+				strcpy(send_dir, "<p><b>DIRECTORIES</b></p><p>");
+				strcpy(send_files, "<p><b>FILES</b></p><p>");
+				char httpline[200];
+				char file_name[100];
+				char file_path[101];
+				// Read items in directory
+				while ((entry = readdir(directory)) != NULL) {
+					// Format the link correctly
+					if (strcmp(resource_dir, "/") != 0) {
+						strcpy(file_name, resource_dir);
+						strcat(file_name, "/");
+					} else {
+						strcpy(file_name, "/");
+					}
+					strcat(file_name, entry->d_name);
+					strcpy(file_path, ".");
+					strcat(file_path, file_name);
+					// Make .. directories link to the directory above, e.g.:
+					// '../src/..' --> '..'
+					if (strcmp(entry->d_name, "..") == 0
+							&& strlen(file_name) > 2) { // Don't link to outside the top level
+						char *ptr = NULL;
+						if ((ptr = strrchr(file_name, '/')) != NULL) {
+							*ptr = '\0';
+							if ((ptr = strrchr(file_name, '/')) != NULL) {
+								*ptr = '\0';
+							}
+						} else {
+							perror("strrchr");
+							return -1;
+						}
+					}
+					// Create HTML link to file/directory
+					sprintf(httpline, "<a href=\"%s\">%s</a><br>", file_name,
+							entry->d_name);
+					if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0) { // Directory and not "."
+						strcat(send_dir, httpline);
+					} else if (entry->d_type == DT_REG && stat(file_name, &file_stats) == 0 // File
+							&& !(file_stats.st_mode & S_IXUSR) // Not executable
+							&& (entry->d_name[0] != '.')) { // Doesn't start with "."
+						strcat(send_files, httpline);
+					}
 				}
+				// Send data
+				strcat(send_dir, "</p>");
+				strcat(send_files, "</p>");
+				char *send = malloc(strlen(send_dir) + strlen(send_files) + 1);
+				strcpy(send, send_dir);
+				strcat(send, send_files);
+				if (send_response(s, status200, send) != 0) {
+					perror("send_response");
+					return -1;
+				}
+				free(resource_dir);
+				free(send_dir);
+				free(send_files);
+				free(send);
+				closedir(directory);
 			} else {
 				// Error 500
 				fprintf(stderr, "Error opening directory %s\n", resource);
