@@ -10,7 +10,6 @@
 
 #include <dirent.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #define buffer_size 2048
 // Status codes for messages which are commonly sent
@@ -91,32 +90,57 @@ int send_file(const int s, char *header, char *file, long length) {
 	return 0;
 }
 
-int list_directory(DIR *directory, char *resource_dir, struct stat file_stats, const int s) {
+int list_directory(DIR *directory, char *resource, char *resource_dir, struct stat file_stats, const int s) {
 	// Directory info
 	struct dirent *entry;
 
-	char *send_dir = malloc(buffer_size);
-	char *send_files = malloc(buffer_size);
+	char *send_dir = malloc(2 * buffer_size);
+	char *send_files = malloc(2 * buffer_size);
+	char *upload_files = malloc(buffer_size);
 	// Format the beginning of the HTML
-	strcpy(send_dir, "<p><b>DIRECTORIES</b></p><p>");
-	strcpy(send_files, "<p><b>FILES</b></p><p>");
+	strcpy(send_dir, "<style>\
+			table {\
+			    font-family: arial, sans-serif;\
+			    border-collapse: collapse;\
+			    width: 50%;\
+		    	    margin: 25px;\
+			}\
+			td, th {\
+			    border: 1px solid #dddddd;\
+			    text-align: left;\
+			    padding: 8px;\
+			}\
+			tr:nth-child(even) {\
+			    background-color: #dddddd;\
+			}\
+			</style>\
+			<table>\
+			<tr>\
+				<th>Directory</th>\
+			</tr>");
+	strcpy(send_files, "<table>\
+			<tr>\
+				<th>File</th>\
+				<th>Size</th>\
+			</tr>");
 	char httpline[200];
 	char file_name[200];
-	char file_path[201];
+	char file_path[202];
 	// Read items in directory
 	while ((entry = readdir(directory)) != NULL) {
 		// Format the link correctly
-		if (strcmp(resource_dir, "/") != 0) {
-			strcpy(file_name, resource_dir);
+		if (strcmp(resource, "/") != 0) {
+			strcpy(file_name, resource);
 			strcat(file_name, "/");
 		} else {
 			strcpy(file_name, "/");
 		}
 		strcat(file_name, entry->d_name);
-		strcpy(file_path, ".");
+		strcpy(file_path, "..");
 		strcat(file_path, file_name);
 		// Make .. directories link to the directory above, e.g.:
 		// '../src/..' --> '..'
+		/*
 		if (strcmp(entry->d_name, "..") == 0
 				&& strlen(file_name) > 2) { // Don't link to outside the top level
 			char *ptr = NULL;
@@ -129,25 +153,36 @@ int list_directory(DIR *directory, char *resource_dir, struct stat file_stats, c
 				perror("strrchr");
 				return -1;
 			}
+		}*/
+		// Fetch stats on the file/directory
+		if (stat(file_path, &file_stats) != 0) {
+			perror("stat");
+			return -1;
 		}
 		// Create HTML link to file/directory
-		printf("%s\n", file_name);
-		sprintf(httpline, "<a href=\"%s\">%s</a><br>", file_name,
-				entry->d_name);
+		printf("name: %s, type: %s, size: %ld, links: %lu\n", file_name, entry->d_type == DT_DIR ? "dir" : "file", file_stats.st_size, file_stats.st_nlink);
 		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0) { // Directory and not "."
+			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a><br></td></tr>", file_name, entry->d_name);
 			strcat(send_dir, httpline);
-		} else if (entry->d_type == DT_REG && stat(file_name, &file_stats) == 0 // File
+		} else if (entry->d_type == DT_REG // File
 				&& !(file_stats.st_mode & S_IXUSR) // Not executable
 				&& (entry->d_name[0] != '.')) { // Doesn't start with "."
+			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a></td><td>%ld bytes</td></tr>", file_name, entry->d_name, file_stats.st_size);
 			strcat(send_files, httpline);
 		}
 	}
 	// Send data
-	strcat(send_dir, "</p>");
-	strcat(send_files, "</p>");
-	char *send = malloc(strlen(send_dir) + strlen(send_files) + 1);
+	strcat(send_dir, "</table>");
+	strcat(send_files, "</table><br><br>");
+	strcpy(upload_files, "<form action=\"src/upload.php\" method=\"post\" nctype=\"multipart/form-data\">\
+  			Select files: \
+  			<input type=\"file\" name=\"file_to_upload\" id=\"file_to_upload\" multiple><br><br>\
+  			<input type=\"submit\" value=\"Upload\" name=\"submit\">\
+			</form>");
+	char *send = malloc(strlen(send_dir) + strlen(send_files) + strlen(upload_files) + 1);
 	strcpy(send, send_dir);
 	strcat(send, send_files);
+	strcat(send, upload_files);
 	if (send_response(s, status200, send) != 0) {
 		perror("send_response");
 		return -1;
@@ -194,6 +229,7 @@ int service_client_socket(const int s, const char * const tag) {
 
 	// Repeatedly read data from the client
 	while ((bytes = read(s, buffer, buffer_size - 1)) > 0) {
+		printf("%s\n", buffer);
 		// Create a copy of the buffer for editing
 		char *buffercopy = malloc(sizeof(buffer));
 		memcpy(buffercopy, buffer, buffer_size);
@@ -203,7 +239,7 @@ int service_client_socket(const int s, const char * const tag) {
 		host += 6; // Remove "Host: " to get just host:port, e.g. localhost:8080
 		
 		request = strtok(buffercopy, " "); // Get everything before the first space (i.e. "GET", "POST" etc)
-		if (strcmp(request, "GET") != 0) { // Make sure it is a GET request
+		if (strcmp(request, "GET") != 0 && strcmp(request, "POST") != 0) { // Make sure it is a GET request
 			// Error 501
 			fprintf(stderr, "Invalid request: %s", request);
 			if (send_response(s, error501, error501http) == -1) {
@@ -217,6 +253,8 @@ int service_client_socket(const int s, const char * const tag) {
 		strcat(working_dir, resource);
 
 		// If the request is a file transfer
+		printf("%s\n", resource);
+		
 		if (stat(working_dir, &file_stats) == 0 && !(file_stats.st_mode & S_IXUSR)) { // Do not show executable files
 			// Call read_file to copy the file data into file_buffer
 			if (read_file(working_dir, &length, &file_buffer) == -1) {
@@ -239,9 +277,10 @@ int service_client_socket(const int s, const char * const tag) {
 			char *resource_dir = malloc(strlen(working_dir) + 2);
 			strcpy(resource_dir, "..");
 			strcat(resource_dir, resource);
+			//printf("working_dir: %s , resource: %s , resource_dir: %s\n", working_dir, resource, resource_dir);
 			// Open the directory resource_dir, e.g. ./testdir
 			if ((directory = opendir(resource_dir)) != NULL) {
-				if (list_directory(directory, resource_dir, file_stats, s) != 0) {
+				if (list_directory(directory, resource, resource_dir, file_stats, s) != 0) {
 					perror("list_directory");
 				}
 			} else {
