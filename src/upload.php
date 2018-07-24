@@ -1,6 +1,13 @@
 <?php
-$target_dir = "uploads/";
-$target_file = $target_dir . basename($_FILES["file_to_upload"]["name"]);
+
+if (isset($argc)) {
+	for ($i = 0; $i < $argc; $i++) {
+		echo "Argument #" . $i . " - " . $argv[$i] . "\n";
+	}
+}
+
+$target_dir = "../uploads/";
+$target_file = $target_dir . basename($_FILES[$_GET["file_to_upload"]]["name"]);
 $uploadOk = 1;
 $imageFileType = strtolower(pathinfo($target_file,PATHINFO_EXTENSION));
 // Check if image file is a actual image or fake image
@@ -44,8 +51,11 @@ if ($uploadOk == 0) {
     if (move_uploaded_file($_FILES["file_to_upload"]["tmp_name"], $target_file)) {
         echo "The file ". basename( $_FILES["file_to_upload"]["name"]). " has been uploaded.";
     } else {
-        echo "Sorry, there was an error uploading your file.";
+        echo "Sorry, there was an error uploading your file.\n";
     }
 }
+
+print_r($_FILES);
+
 ?>
 

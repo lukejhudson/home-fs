@@ -13,6 +13,7 @@
 
 #define buffer_size 2048
 // Status codes for messages which are commonly sent
+char status100[] = "HTTP/1.1 100 Continue\n\n";
 char status200[] = "HTTP/1.1 200 OK\nContent-Length: %d\n\n";
 char error500[] = "HTTP/1.1 500 Internal Server Error\nContent-Length: %d\n\n";
 char error500http[] = "<html><body><h1>Error 500 Internal Server Error</h1></body></html>";
@@ -160,7 +161,7 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 			return -1;
 		}
 		// Create HTML link to file/directory
-		printf("name: %s, type: %s, size: %ld, links: %lu\n", file_name, entry->d_type == DT_DIR ? "dir" : "file", file_stats.st_size, file_stats.st_nlink);
+		// printf("name: %s, type: %s, size: %ld, links: %lu\n", file_name, entry->d_type == DT_DIR ? "dir" : "file", file_stats.st_size, file_stats.st_nlink);
 		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0) { // Directory and not "."
 			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a><br></td></tr>", file_name, entry->d_name);
 			strcat(send_dir, httpline);
@@ -239,13 +240,7 @@ int service_client_socket(const int s, const char * const tag) {
 		host += 6; // Remove "Host: " to get just host:port, e.g. localhost:8080
 		
 		request = strtok(buffercopy, " "); // Get everything before the first space (i.e. "GET", "POST" etc)
-		if (strcmp(request, "GET") != 0 && strcmp(request, "POST") != 0) { // Make sure it is a GET request
-			// Error 501
-			fprintf(stderr, "Invalid request: %s", request);
-			if (send_response(s, error501, error501http) == -1) {
-				return -1;
-			}
-		}
+		
 		resource = strtok(NULL, " "); // Get second word in request, e.g. / or /test.txt
 		// Using cwd and the requested resource, find the path to the resource
 		char *working_dir = malloc(strlen(cwd) + strlen(resource) + 1);
@@ -255,44 +250,73 @@ int service_client_socket(const int s, const char * const tag) {
 		// If the request is a file transfer
 		printf("%s\n", resource);
 		
-		if (stat(working_dir, &file_stats) == 0 && !(file_stats.st_mode & S_IXUSR)) { // Do not show executable files
-			// Call read_file to copy the file data into file_buffer
-			if (read_file(working_dir, &length, &file_buffer) == -1) {
-				// 500 Internal Server Error
-				perror("Failed to read file");
-				if (send_response(s, error500, error500http) == -1) {
-					perror("Failed to send fail response");
+		if (strcmp(request, "GET") == 0) { // GET request
+			if (stat(working_dir, &file_stats) == 0 && !(file_stats.st_mode & S_IXUSR)) { // Do not show executable files
+				// Call read_file to copy the file data into file_buffer
+				if (read_file(working_dir, &length, &file_buffer) == -1) {
+					// 500 Internal Server Error
+					perror("Failed to read file");
+					if (send_response(s, error500, error500http) == -1) {
+						perror("Failed to send fail response");
+					}
+				} else {
+					// Send the file
+					send_file(s, status200, file_buffer, length);
 				}
-			} else {
-				// Send the file
-				send_file(s, status200, file_buffer, length);
+			} else { // Not a file, so must be a directory
+				// Remove trailing "/"'s
+				while (resource[strlen(resource) - 1] == '/') {
+					resource[strlen(resource) - 1] = '\0';
+				}
+				// Get correct path to request directory
+				// (Since code is running in /src we need to go up a directory)
+				char *resource_dir = malloc(strlen(working_dir) + 2);
+				strcpy(resource_dir, "..");
+				strcat(resource_dir, resource);
+				//printf("working_dir: %s , resource: %s , resource_dir: %s\n", working_dir, resource, resource_dir);
+				// Open the directory resource_dir, e.g. ./testdir
+				if ((directory = opendir(resource_dir)) != NULL) {
+					if (list_directory(directory, resource, resource_dir, file_stats, s) != 0) {
+						perror("list_directory");
+					}
+				} else {
+					// Error 500
+					fprintf(stderr, "Cannot find file/directory %s\n", resource);
+					if (send_response(s, error500, error500http) != 0) {
+						perror("send_response error500");
+						return -1;
+					}
+				}
 			}
-		} else { // Not a file, so must be a directory
-			// Remove trailing "/"'s
-			while (resource[strlen(resource) - 1] == '/') {
-				resource[strlen(resource) - 1] = '\0';
+			free(working_dir);
+			free(buffercopy);
+		} else if (strcmp(request, "POST") == 0) { // POST request
+		/*
+				// Call read_file to copy the file data into file_buffer
+				if (read_file(working_dir, &length, &file_buffer) == -1) {
+					// 500 Internal Server Error
+					perror("Failed to read file");
+					if (send_response(s, error500, error500http) == -1) {
+						perror("Failed to send fail response");
+					}	
+				} else {
+					// Send the file
+					send_file(s, status100, file_buffer, length);
+				}
+		*/
+			printf("STATUS 100\n");
+			if (send_response(s, status100, "")) {
+				perror("send_response status100");
+				return -1;
 			}
-			// Get correct path to request directory
-			// (Since code is running in /src we need to go up a directory)
-			char *resource_dir = malloc(strlen(working_dir) + 2);
-			strcpy(resource_dir, "..");
-			strcat(resource_dir, resource);
-			//printf("working_dir: %s , resource: %s , resource_dir: %s\n", working_dir, resource, resource_dir);
-			// Open the directory resource_dir, e.g. ./testdir
-			if ((directory = opendir(resource_dir)) != NULL) {
-				if (list_directory(directory, resource, resource_dir, file_stats, s) != 0) {
-					perror("list_directory");
-				}
-			} else {
-				// Error 500
-				fprintf(stderr, "Error opening directory %s\n", resource);
-				if (send_response(s, error500, error500http) != 0) {
-					return -1;
-				}
+		} else {
+			// Error 501
+			fprintf(stderr, "Invalid request: %s", request);
+			if (send_response(s, error501, error501http) == -1) {
+				perror("send_response err501");
+				return -1;
 			}
 		}
-		free(working_dir);
-		free(buffercopy);
 	}
 
 	if (bytes != 0) {
