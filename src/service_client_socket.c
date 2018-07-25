@@ -3,6 +3,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 #include <sys/socket.h>
 #include <netdb.h>
@@ -178,7 +179,7 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	strcat(send_files, "</table><br><br>");
 	strcpy(upload_files, "<form action=\"upload.php\" method=\"post\" enctype=\"multipart/form-data\">\
   			Select files: \
-  			<input type=\"file\" name=\"file_to_upload\" id=\"file_to_upload\" multiple><br><br>\
+  			<input type=\"file\" name=\"file_to_upload[]\" id=\"file_to_upload\" multiple><br><br>\
   			<input type=\"submit\" value=\"Upload\" name=\"submit\">\
 			</form>");
 	char *send = malloc(strlen(send_dir) + strlen(send_files) + strlen(upload_files) + 1);
@@ -246,7 +247,7 @@ char *str_replace(char *orig, char *rep, char *with) {
 }
 
 // http://man7.org/linux/man-pages/man3/getaddrinfo.3.html
-int run_php(char *msg, int sfd) {
+int run_php(char *msg, int sfd, size_t bytes, int uploading) {
 	int j;
 	size_t len;
 	ssize_t nread;
@@ -259,28 +260,28 @@ int run_php(char *msg, int sfd) {
 	
 	//msg = str_replace(msg, "localhost:8080", "localhost:8000");
 
-	len = strlen(msg);
+	len = bytes;//strlen(msg);
 	printf("len: %ld\n", len);
 
 	if (len + 1 > BUFFER_SIZE) {
 		fprintf(stderr, "Can't send to php server; request too large\n");
 		return -1;
 	}
-	
-	printf("\n\n%s\n\n", msg);
+	//msg[bytes] = '\0';
+	//printf("\n----------\n%s\n----------\n", msg);
 
 	if (write(sfd, msg, len) != len) {
 		fprintf(stderr, "partial/failed write\n");
 		return -1;
 	}
-
-	nread = read(sfd, buffer, BUFFER_SIZE);
-	if (nread == -1) {
-		perror("read");
-		return -1;
+	if (!uploading) {
+		nread = read(sfd, buffer, BUFFER_SIZE);
+		if (nread == -1) {
+			perror("read");
+			return -1;
+		}
+		printf("Received %zd bytes: %s\n", nread, buffer);
 	}
-
-	printf("Received %zd bytes: %s\n", nread, buffer);
 }
 
 int connect_php(int *sfd) {
@@ -331,6 +332,35 @@ int connect_php(int *sfd) {
 	printf("Connected\n");
 }
 
+int parse_http_headers(char *buffer, char **host, char **request, char **resource, int *clen) {
+	char *cont_len;
+	if ((cont_len = strstr(buffer, "Content-Length: ")) != NULL) {
+		cont_len = strtok(cont_len, "\r\n");
+		cont_len += 16;
+		char *endp; // Check that content_length is a number
+		*clen = strtol(cont_len, &endp, 10);
+		if (*endp != '\0') {
+			fprintf(stderr, "%s is not a number\n", cont_len);
+		} else {
+			//printf("Content-Length: %d\n", *clen);
+		}
+	} else {
+		//printf("No Content-Length\n");
+		*clen = -1;
+	}
+	
+	*host = strstr(buffer, "Host: "); // Get pointer to start of host line
+	*host = strtok(*host, "\r\n"); // Remove everything after the host line (not needed)
+	*host += 6; // Remove "Host: " to get just host:port, e.g. localhost:8080
+	//printf("Host: %s\n", *host);
+	
+	*request = strtok(buffer, " "); // Get everything before the first space (i.e. "GET", "POST" etc)
+	//printf("Request: %s\n", *request);
+		
+	*resource = strtok(NULL, " "); // Get second word in request, e.g. / or /test.txt
+	//printf("Resource: %s\n", *resource);
+}
+
 int service_client_socket(const int s, const char * const tag) {
 	int sfd; // Connection info for php server
 	char buffer[BUFFER_SIZE];
@@ -338,6 +368,7 @@ int service_client_socket(const int s, const char * const tag) {
 	char *request; // e.g. GET
 	char *resource; // e.g.  /  or  /test.txt
 	char *host; // e.g. localhost:8080
+	bool uploading = false; // Are we expecting multiple reads from one request?
 	// File info
 	char *file_buffer;
 	long length;
@@ -365,21 +396,27 @@ int service_client_socket(const int s, const char * const tag) {
 	printf("New connection from %s\n", tag);
 	
 	connect_php(&sfd);
+	
+	int bytes_read, bytes_total;
 
 	// Repeatedly read data from the client
 	while ((bytes = read(s, buffer, BUFFER_SIZE - 1)) > 0) {
-		//printf("%s\n", buffer);
+		// printf("%s\n", buffer);
 		// Create a copy of the buffer for editing
 		char *buffercopy = malloc(sizeof(buffer));
 		memcpy(buffercopy, buffer, BUFFER_SIZE);
-		// Parse HTML request:
-		host = strstr(buffercopy, "Host: "); // Get pointer to start of host line
-		host = strtok(host, "\r\n"); // Remove everything after the host line (not needed)
-		host += 6; // Remove "Host: " to get just host:port, e.g. localhost:8080
-		
-		request = strtok(buffercopy, " "); // Get everything before the first space (i.e. "GET", "POST" etc)
-		
-		resource = strtok(NULL, " "); // Get second word in request, e.g. / or /test.txt
+		if (!uploading) {
+			// Parse HTTP request:
+			parse_http_headers(buffercopy, &host, &request, &resource, &bytes_total);
+			printf("Host: %s, Request: %s, Resource: %s, Content-Length: %d\n", host, request, resource, bytes_total);
+			
+			bytes_read = 0;
+			bytes_read += strlen(strstr(buffer, "\r\n\r\n"));
+			//printf("@@@@@\n%s@@@@@\n%ld\n", strstr(buffer, "\r\n\r\n"), strlen(strstr(buffer, "\r\n\r\n")));
+		} else {
+			bytes_read += bytes;
+		}
+		printf("bytes_read: %d, bytes_total: %d, bytes: %ld\n", bytes_read, bytes_total, bytes);
 		// Using cwd and the requested resource, find the path to the resource
 		char *working_dir = malloc(strlen(cwd) + strlen(resource) + 1);
 		strcpy(working_dir, cwd);
@@ -388,7 +425,7 @@ int service_client_socket(const int s, const char * const tag) {
 		// If the request is a file transfer
 		// printf("%s\n", resource);
 		
-		if (strcmp(request, "GET") == 0) { // GET request
+		if (!uploading && strcmp(request, "GET") == 0) { // GET request
 			if (stat(working_dir, &file_stats) == 0 && !(file_stats.st_mode & S_IXUSR)) { // Do not show executable files
 				// Call read_file to copy the file data into file_buffer
 				if (read_file(working_dir, &length, &file_buffer) == -1) {
@@ -427,8 +464,7 @@ int service_client_socket(const int s, const char * const tag) {
 				}
 			}
 			free(working_dir);
-			free(buffercopy);
-		} else if (strcmp(request, "POST") == 0) { // POST request
+		} else if (uploading || strcmp(request, "POST") == 0) { // POST request
 		/*
 			// Call read_file to copy the file data into file_buffer
 			if (read_file(working_dir, &length, &file_buffer) == -1) {
@@ -449,7 +485,12 @@ int service_client_socket(const int s, const char * const tag) {
 				return -1;
 			}
 		*/
-			run_php(buffer, sfd);
+			if (bytes_read < bytes_total) {
+				uploading = true;
+			} else {
+				uploading = false;
+			}
+			run_php(buffer, sfd, bytes, uploading);
 		} else {
 			// Error 501
 			fprintf(stderr, "Invalid request: %s", request);
@@ -458,6 +499,8 @@ int service_client_socket(const int s, const char * const tag) {
 				return -1;
 			}
 		}
+		free(buffercopy);
+		memset(buffer, '\0', BUFFER_SIZE);
 	}
 
 	if (bytes != 0) {
