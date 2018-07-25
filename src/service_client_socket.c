@@ -5,15 +5,16 @@
 #include <unistd.h>
 
 #include <sys/socket.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #include <dirent.h>
 #include <sys/stat.h>
 
-#define buffer_size 2048
+#define BUFFER_SIZE 2048
 // Status codes for messages which are commonly sent
-char status100[] = "HTTP/1.1 100 Continue\n\n";
+char status100[] = "HTTP/1.1 100 OK\nContent-Length: 0\n\n";
 char status200[] = "HTTP/1.1 200 OK\nContent-Length: %d\n\n";
 char error500[] = "HTTP/1.1 500 Internal Server Error\nContent-Length: %d\n\n";
 char error500http[] = "<html><body><h1>Error 500 Internal Server Error</h1></body></html>";
@@ -95,9 +96,9 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	// Directory info
 	struct dirent *entry;
 
-	char *send_dir = malloc(2 * buffer_size);
-	char *send_files = malloc(2 * buffer_size);
-	char *upload_files = malloc(buffer_size);
+	char *send_dir = malloc(2 * BUFFER_SIZE);
+	char *send_files = malloc(2 * BUFFER_SIZE);
+	char *upload_files = malloc(BUFFER_SIZE);
 	// Format the beginning of the HTML
 	strcpy(send_dir, "<style>\
 			table {\
@@ -175,7 +176,7 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	// Send data
 	strcat(send_dir, "</table>");
 	strcat(send_files, "</table><br><br>");
-	strcpy(upload_files, "<form action=\"src/upload.php\" method=\"post\" nctype=\"multipart/form-data\">\
+	strcpy(upload_files, "<form action=\"upload.php\" method=\"post\" enctype=\"multipart/form-data\">\
   			Select files: \
   			<input type=\"file\" name=\"file_to_upload\" id=\"file_to_upload\" multiple><br><br>\
   			<input type=\"submit\" value=\"Upload\" name=\"submit\">\
@@ -196,8 +197,143 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	return 0;
 }
 
+// You must free the result if result is non-NULL.
+// https://stackoverflow.com/questions/779875/what-is-the-function-to-replace-string-in-c
+char *str_replace(char *orig, char *rep, char *with) {
+	char *result; // the return string
+	char *ins;    // the next insert point
+	char *tmp;    // varies
+	int len_rep;  // length of rep (the string to remove)
+	int len_with; // length of with (the string to replace rep with)
+	int len_front; // distance between rep and end of last rep
+	int count;    // number of replacements
+
+	// sanity checks and initialization
+	if (!orig || !rep)
+		return NULL;
+	len_rep = strlen(rep);
+	if (len_rep == 0)
+		return NULL; // empty rep causes infinite loop during count
+	if (!with)
+	with = "";
+	len_with = strlen(with);
+
+	// count the number of replacements needed
+	ins = orig;
+	for (count = 0; tmp = strstr(ins, rep); ++count) {
+		ins = tmp + len_rep;
+	}
+
+	tmp = result = malloc(strlen(orig) + (len_with - len_rep) * count + 1);
+
+	if (!result)
+		return NULL;
+
+	// first time through the loop, all the variable are set correctly
+	// from here on,
+	//    tmp points to the end of the result string
+	//    ins points to the next occurrence of rep in orig
+	//    orig points to the remainder of orig after "end of rep"
+	while (count--) {
+		ins = strstr(orig, rep);
+		len_front = ins - orig;
+		tmp = strncpy(tmp, orig, len_front) + len_front;
+		tmp = strcpy(tmp, with) + len_with;
+		orig += len_front + len_rep; // move to next "end of rep"
+	}
+	strcpy(tmp, orig);
+	return result;
+}
+
+// http://man7.org/linux/man-pages/man3/getaddrinfo.3.html
+int run_php(char *msg, int sfd) {
+	int j;
+	size_t len;
+	ssize_t nread;
+	char buffer[BUFFER_SIZE];
+	
+	printf("\nrun_php\n");
+
+	/* Send remaining command-line arguments as separate
+	datagrams, and read responses from server */
+	
+	//msg = str_replace(msg, "localhost:8080", "localhost:8000");
+
+	len = strlen(msg);
+	printf("len: %ld\n", len);
+
+	if (len + 1 > BUFFER_SIZE) {
+		fprintf(stderr, "Can't send to php server; request too large\n");
+		return -1;
+	}
+	
+	printf("\n\n%s\n\n", msg);
+
+	if (write(sfd, msg, len) != len) {
+		fprintf(stderr, "partial/failed write\n");
+		return -1;
+	}
+
+	nread = read(sfd, buffer, BUFFER_SIZE);
+	if (nread == -1) {
+		perror("read");
+		return -1;
+	}
+
+	printf("Received %zd bytes: %s\n", nread, buffer);
+}
+
+int connect_php(int *sfd) {
+	struct addrinfo hints;
+	struct addrinfo *result, *rp;
+	int s;
+	/* Obtain address(es) matching host/port */
+	
+	printf("Connecting to PHP server... ");
+
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = AF_UNSPEC;    /* Allow IPv4 or IPv6 */
+	hints.ai_socktype = SOCK_STREAM; /* Datagram socket */
+	hints.ai_flags = 0;
+	hints.ai_protocol = 0;          /* Any protocol */
+
+	s = getaddrinfo("127.0.0.1", "8000", &hints, &result);
+	if (s != 0) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+		perror("Could not connect to php server");
+		return -1;
+	}
+
+	/* getaddrinfo() returns a list of address structures.
+	Try each address until we successfully connect(2).
+	If socket(2) (or connect(2)) fails, we (close the socket
+	and) try the next address. */
+
+	for (rp = result; rp != NULL; rp = rp->ai_next) {
+		*sfd = socket(rp->ai_family, rp->ai_socktype,
+		    rp->ai_protocol);
+		if (*sfd == -1)
+			continue;
+
+		if (connect(*sfd, rp->ai_addr, rp->ai_addrlen) != -1)
+			break;                  /* Success */
+
+		close(*sfd);
+	}
+
+	if (rp == NULL) {               /* No address succeeded */
+		perror("Could not connect to php server");
+		return -1;
+	}
+
+	freeaddrinfo(result);           /* No longer needed */
+	
+	printf("Connected\n");
+}
+
 int service_client_socket(const int s, const char * const tag) {
-	char buffer[buffer_size];
+	int sfd; // Connection info for php server
+	char buffer[BUFFER_SIZE];
 	size_t bytes;
 	char *request; // e.g. GET
 	char *resource; // e.g.  /  or  /test.txt
@@ -210,7 +346,7 @@ int service_client_socket(const int s, const char * const tag) {
 	// File info - Find if file is executable
 	struct stat file_stats;
 	// Current working directory
-	char cwd[buffer_size];
+	char cwd[BUFFER_SIZE];
 	if (getcwd(cwd, sizeof(cwd)) != NULL)
 		fprintf(stdout, "Current working dir: %s\n", cwd);
 	else
@@ -227,13 +363,15 @@ int service_client_socket(const int s, const char * const tag) {
 	fprintf(stdout, "Up one: %s\n", cwd);
 
 	printf("New connection from %s\n", tag);
+	
+	connect_php(&sfd);
 
 	// Repeatedly read data from the client
-	while ((bytes = read(s, buffer, buffer_size - 1)) > 0) {
-		printf("%s\n", buffer);
+	while ((bytes = read(s, buffer, BUFFER_SIZE - 1)) > 0) {
+		//printf("%s\n", buffer);
 		// Create a copy of the buffer for editing
 		char *buffercopy = malloc(sizeof(buffer));
-		memcpy(buffercopy, buffer, buffer_size);
+		memcpy(buffercopy, buffer, BUFFER_SIZE);
 		// Parse HTML request:
 		host = strstr(buffercopy, "Host: "); // Get pointer to start of host line
 		host = strtok(host, "\r\n"); // Remove everything after the host line (not needed)
@@ -248,7 +386,7 @@ int service_client_socket(const int s, const char * const tag) {
 		strcat(working_dir, resource);
 
 		// If the request is a file transfer
-		printf("%s\n", resource);
+		// printf("%s\n", resource);
 		
 		if (strcmp(request, "GET") == 0) { // GET request
 			if (stat(working_dir, &file_stats) == 0 && !(file_stats.st_mode & S_IXUSR)) { // Do not show executable files
@@ -292,23 +430,26 @@ int service_client_socket(const int s, const char * const tag) {
 			free(buffercopy);
 		} else if (strcmp(request, "POST") == 0) { // POST request
 		/*
-				// Call read_file to copy the file data into file_buffer
-				if (read_file(working_dir, &length, &file_buffer) == -1) {
-					// 500 Internal Server Error
-					perror("Failed to read file");
-					if (send_response(s, error500, error500http) == -1) {
-						perror("Failed to send fail response");
-					}	
-				} else {
-					// Send the file
-					send_file(s, status100, file_buffer, length);
-				}
+			// Call read_file to copy the file data into file_buffer
+			if (read_file(working_dir, &length, &file_buffer) == -1) {
+				// 500 Internal Server Error
+				perror("Failed to read file");
+				if (send_response(s, error500, error500http) == -1) {
+					perror("Failed to send fail response");
+				}	
+			} else {
+				// Send the file
+				send_file(s, status100, file_buffer, length);
+			}
 		*/
+		/*
 			printf("STATUS 100\n");
 			if (send_response(s, status100, "")) {
 				perror("send_response status100");
 				return -1;
 			}
+		*/
+			run_php(buffer, sfd);
 		} else {
 			// Error 501
 			fprintf(stderr, "Invalid request: %s", request);

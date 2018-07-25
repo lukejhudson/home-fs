@@ -1,13 +1,6 @@
 <?php
-
-if (isset($argc)) {
-	for ($i = 0; $i < $argc; $i++) {
-		echo "Argument #" . $i . " - " . $argv[$i] . "\n";
-	}
-}
-
 $target_dir = "../uploads/";
-$target_file = $target_dir . basename($_FILES[$_GET["file_to_upload"]]["name"]);
+$target_file = $target_dir . basename($_FILES["file_to_upload"]["name"]);
 $uploadOk = 1;
 $imageFileType = strtolower(pathinfo($target_file,PATHINFO_EXTENSION));
 // Check if image file is a actual image or fake image
