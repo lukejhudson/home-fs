@@ -15,7 +15,7 @@
 
 #define BUFFER_SIZE 2048
 // Status codes for messages which are commonly sent
-char status100[] = "HTTP/1.1 100 OK\nContent-Length: 0\n\n";
+char status205[] = "HTTP/1.1 200 OK\r\n\r\n";
 char status200[] = "HTTP/1.1 200 OK\nContent-Length: %d\n\n";
 char error500[] = "HTTP/1.1 500 Internal Server Error\nContent-Length: %d\n\n";
 char error500http[] = "<html><body><h1>Error 500 Internal Server Error</h1></body></html>";
@@ -92,7 +92,10 @@ int send_file(const int s, char *header, char *file, long length) {
 	free(file);
 	return 0;
 }
-
+/*
+resource = "/" or "/uploads"
+resource_dir = "/.." or "/../uploads"
+*/
 int list_directory(DIR *directory, char *resource, char *resource_dir, struct stat file_stats, const int s) {
 	// Directory info
 	struct dirent *entry;
@@ -247,21 +250,19 @@ char *str_replace(char *orig, char *rep, char *with) {
 }
 
 // http://man7.org/linux/man-pages/man3/getaddrinfo.3.html
-int run_php(char *msg, int sfd, size_t bytes, int uploading) {
+int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s) {
 	int j;
 	size_t len;
 	ssize_t nread;
 	char buffer[BUFFER_SIZE];
 	
-	printf("\nrun_php\n");
-
 	/* Send remaining command-line arguments as separate
 	datagrams, and read responses from server */
 	
 	//msg = str_replace(msg, "localhost:8080", "localhost:8000");
 
 	len = bytes;//strlen(msg);
-	printf("len: %ld\n", len);
+	//printf("len: %ld\n", len);
 
 	if (len + 1 > BUFFER_SIZE) {
 		fprintf(stderr, "Can't send to php server; request too large\n");
@@ -280,7 +281,18 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading) {
 			perror("read");
 			return -1;
 		}
+		buffer[nread] = '\0';
 		printf("Received %zd bytes: %s\n", nread, buffer);
+		// Check response from php server
+		
+		// Remove headers from response
+		char *response = strstr(buffer, "\r\n\r\n") + 4;
+		//strtok(strstr(response, "\r\n\r\n"), "\r\n");
+		printf("RESPONSE: ---\n%s\n---\n", response);
+		// Copy the php echos in the body
+		// Send back page with added popup with response message
+		
+		send_response(s, status205, "");
 	}
 }
 
@@ -391,7 +403,7 @@ int service_client_socket(const int s, const char * const tag) {
 		perror("getcwd");
 		return -1;
 	}
-	fprintf(stdout, "Up one: %s\n", cwd);
+	//fprintf(stdout, "Up one: %s\n", cwd);
 
 	printf("New connection from %s\n", tag);
 	
@@ -408,15 +420,17 @@ int service_client_socket(const int s, const char * const tag) {
 		if (!uploading) {
 			// Parse HTTP request:
 			parse_http_headers(buffercopy, &host, &request, &resource, &bytes_total);
-			printf("Host: %s, Request: %s, Resource: %s, Content-Length: %d\n", host, request, resource, bytes_total);
+			//printf("Host: %s, Request: %s, Resource: %s, Content-Length: %d\n", host, request, resource, bytes_total);
 			
 			bytes_read = 0;
-			bytes_read += strlen(strstr(buffer, "\r\n\r\n"));
+			//bytes_read += strlen(strstr(buffer, "\r\n\r\n"));
+			bytes_read += bytes - (strstr(buffer, "\r\n\r\n") - buffer); // Bytes - distance from start of buffer to end of headers
+			//printf("BYTES_READ: %d, BYTES: %ld, HEADERS: %ld\n", bytes_read, bytes, (strstr(buffer, "\r\n\r\n") - buffer));
 			//printf("@@@@@\n%s@@@@@\n%ld\n", strstr(buffer, "\r\n\r\n"), strlen(strstr(buffer, "\r\n\r\n")));
 		} else {
 			bytes_read += bytes;
 		}
-		printf("bytes_read: %d, bytes_total: %d, bytes: %ld\n", bytes_read, bytes_total, bytes);
+		//printf("bytes_read: %d, bytes_total: %d, bytes: %ld\n", bytes_read, bytes_total, bytes);
 		// Using cwd and the requested resource, find the path to the resource
 		char *working_dir = malloc(strlen(cwd) + strlen(resource) + 1);
 		strcpy(working_dir, cwd);
@@ -485,12 +499,13 @@ int service_client_socket(const int s, const char * const tag) {
 				return -1;
 			}
 		*/
+			// printf("bytes_read: %d, bytes_total: %d\n", bytes_read, bytes_total);
 			if (bytes_read < bytes_total) {
 				uploading = true;
 			} else {
 				uploading = false;
 			}
-			run_php(buffer, sfd, bytes, uploading);
+			run_php(buffer, sfd, bytes, uploading, s);
 		} else {
 			// Error 501
 			fprintf(stderr, "Invalid request: %s", request);
