@@ -1,3 +1,0 @@
-#!/bin/bash
-
-gcc -o server server_multi.c service_client_socket.c make_printable_addr.c -lpthread

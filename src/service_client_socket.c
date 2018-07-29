@@ -205,7 +205,7 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
   			<input type=\"file\" name=\"file_to_upload[]\" id=\"file_to_upload\" multiple><br><br>\
   			<input type=\"submit\" value=\"Upload\" name=\"submit\">\
 			</form>", resource);
-	printf("UPDATE: %s\n", update ? "true" : "false");
+	//printf("UPDATE: %s\n", update ? "true" : "false");
 	if (update) {
 		printf("RESP: %s\n", response);
 		strcat(upload_files, response);
@@ -233,18 +233,14 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 int send_page(char *resource, char *working_dir, struct stat file_stats, const int s, bool update, char *response) {
 	DIR *directory;
 	// Remove trailing "/"'s
-	printf("strlen: %ld\n", strlen(resource));
 	while (strlen(resource) > 0 && resource[strlen(resource) - 1] == '/') {
-		printf("ads\n"); 
 		resource[strlen(resource) - 1] = '\0';
 	}
 	// Get correct path to request directory
 	// (Since code is running in /src we need to go up a directory)
-	printf("asdasda\n");
 	char *resource_dir = malloc(strlen(working_dir) + 2);
 	strcpy(resource_dir, "..");
 	strcat(resource_dir, resource);
-	printf("working_dir: %s, resource: %s, resource_dir: %s\n", working_dir, resource, resource_dir);
 	// Open the directory resource_dir, e.g. ./testdir
 	if ((directory = opendir(resource_dir)) != NULL) {
 		if (list_directory(directory, resource, resource_dir, file_stats, s, update, response) != 0) {
@@ -333,7 +329,7 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 	
 	// Edit the headers being sent to the php server
 	if (first_read) {
-		printf("\nHEADERS\n\n");
+		//printf("\nHEADERS\n\n");
 		char path[BUFFER_SIZE];
 		char *ptr = NULL;
 	
@@ -344,9 +340,9 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 		//printf("PATH: \n%s\n", path);
 		ptr = strstr(path, "upload.php");
 		*ptr = '\0';
-		printf("PATH: \n%s\n", path);
+		//printf("PATH: \n%s\n", path);
 		strcpy(resource, path);
-		printf("RESOURCE: \n%s\n", resource);
+		//printf("RESOURCE: \n%s\n", resource);
 		
 		// Remove the /src/ part from the message being sent to server
 		//printf("MSG: \n%s\n", msg);
@@ -363,9 +359,10 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 		strcpy(tmp, msg);
 		strtok(msg, "/");
 		//printf("MSG: \n%s\n", msg);
-		sprintf(msg, "%s/%s", msg, ptr);
+		sprintf(tmp, "%s/%s", msg, ptr);
+		strcpy(msg, tmp);
 		//printf("\n\nPTR: \n%s\n", ptr);
-		printf("MSG: \n%s\n", msg);
+		//printf("MSG: \n%s\n", msg);
 		
 		len -= strlen(path) - 1;
 	}
@@ -385,28 +382,30 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 		// Check response from php server
 		
 		// Remove headers from response
-		printf("strstr response\n");
+		//printf("strstr response\n");
 		char *response;
-		if ((response = strstr(buffer, "\r\n\r\n") + 4) != NULL) {
+		if (nread != 0 && (response = strstr(buffer, "\r\n\r\n") + 4) != NULL) {
 			// strtok(strstr(response, "\r\n\r\n"), "\r\n");
 			// printf("RESPONSE: ---\n%s\n---\n", response);
 			// Remove double line at end
-			printf("strstr end\n");
-			printf("len buf: %ld\n", strlen(buffer));
-			printf("len resp: %ld\n", strlen(response));
+			//printf("strstr end\n");
+			//printf("len buf: %ld\n", strlen(buffer));
+			//printf("len resp: %ld\n", strlen(response));
 			char *end;
 			if ((end = strstr(response, "\n\n")) != NULL) {
 				*end = '\0';
 			}
-			printf("strstr end2\n");
-			printf("RESPONSE: ---\n%s\n---\n", response);
+			//printf("strstr end2\n");
+			//printf("RESPONSE: ---\n%s\n---\n", response);
+		} else {
+			response = "There was a problem uploading your file";
 		}
 		// Send back page with added popup with response message
-		printf("SEND_PAGE\n");
+		//printf("SEND_PAGE\n");
 		if (send_page(resource, working_dir, file_stats, s, true, strdup(response)) != 0) {
 			perror("list_directory");
 		}
-		printf("SEND_PAGE_DONE\n");
+		//printf("SEND_PAGE_DONE\n");
 	}
 	return 0;
 }
@@ -471,6 +470,7 @@ int parse_http_headers(char *buffer, char **host, char **request, char **resourc
 		*clen = strtol(cont_len, &endp, 10);
 		if (*endp != '\0') {
 			fprintf(stderr, "%s is not a number\n", cont_len);
+			return -1;
 		} else {
 			//printf("Content-Length: %d\n", *clen);
 		}
@@ -495,6 +495,8 @@ int parse_http_headers(char *buffer, char **host, char **request, char **resourc
 	//printf("Resource: %s\n", *resource_tmp);
 	if (*resource != NULL) free(*resource);
 	*resource = strdup(resource_tmp);
+	
+	return 0;
 }
 
 int service_client_socket(const int s, const char * const tag) {
@@ -531,13 +533,11 @@ int service_client_socket(const int s, const char * const tag) {
 
 	printf("New connection from %s\n", tag);
 	
-	
-	
 	int bytes_read, bytes_total;
 
 	// Repeatedly read data from the client
 	while ((bytes = read(s, buffer, BUFFER_SIZE - 1)) > 0) {
-		// printf("%s\n", buffer);
+		// printf("===== BUFFER =====\n%s\n=================\n", buffer);
 		// Create a copy of the buffer for editing
 		char *buffercopy = malloc(sizeof(buffer));
 		memcpy(buffercopy, buffer, BUFFER_SIZE);
@@ -545,7 +545,10 @@ int service_client_socket(const int s, const char * const tag) {
 			connect_php(&sfd);
 			first_read = true;
 			// Parse HTTP request:
-			parse_http_headers(buffercopy, &host, &request, &resource, &bytes_total);
+			if (parse_http_headers(buffercopy, &host, &request, &resource, &bytes_total) != 0) {
+				perror("parse_http_headers");
+				return -1;
+			}
 			//printf("Host: %s, Request: %s, Resource: %s, Content-Length: %d\n", host, request, resource, bytes_total);
 			
 			bytes_read = 0;
@@ -553,6 +556,12 @@ int service_client_socket(const int s, const char * const tag) {
 			bytes_read += bytes - (strstr(buffer, "\r\n\r\n") - buffer); // Bytes - distance from start of buffer to end of headers
 			//printf("BYTES_READ: %d, BYTES: %ld, HEADERS: %ld\n", bytes_read, bytes, (strstr(buffer, "\r\n\r\n") - buffer));
 			//printf("@@@@@\n%s@@@@@\n%ld\n", strstr(buffer, "\r\n\r\n"), strlen(strstr(buffer, "\r\n\r\n")));
+			
+			if (bytes_total != -1 && bytes_read > bytes_total) {
+				fprintf(stderr, "Incorrect Content-Length:\nbytes_read: %ld, bytes_total: %d\n", bytes, bytes_total);
+				fprintf(stderr, "Closing connection\n");
+				return -1;
+			}
 		} else {
 			first_read = false;
 			bytes_read += bytes;
