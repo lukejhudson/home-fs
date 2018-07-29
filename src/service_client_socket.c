@@ -15,7 +15,6 @@
 
 #define BUFFER_SIZE 2048
 // Status codes for messages which are commonly sent
-char status205[] = "HTTP/1.1 200 OK\r\n\r\n";
 char status200[] = "HTTP/1.1 200 OK\nContent-Length: %d\n\n";
 char error500[] = "HTTP/1.1 500 Internal Server Error\nContent-Length: %d\n\n";
 char error500http[] = "<html><body><h1>Error 500 Internal Server Error</h1></body></html>";
@@ -104,16 +103,28 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	// Directory info
 	struct dirent *entry;
 	
+	if ((directory = opendir(resource_dir)) == NULL) {
+		// Error 500
+		fprintf(stderr, "Cannot find file/directory %s\n", resource);
+		if (send_response(s, error500, error500http) != 0) {
+			perror("send_response error500");
+			return -1;
+		}
+	}
+	
 	// Find number of files in directory
 	int num_files = 0;
 	while ((entry = readdir(directory)) != NULL) num_files++; 
 	printf("Number of files: %d\n", num_files);
+	
+	closedir(directory);
 
+	char *css = malloc(BUFFER_SIZE);
 	char *send_dir = malloc(BUFFER_SIZE + 256 * num_files);
 	char *send_files = malloc(BUFFER_SIZE + 256 * num_files);
 	char *upload_files = malloc(BUFFER_SIZE);
 	// Format the beginning of the HTML
-	strcpy(send_dir, "<style>\
+	strcpy(css, "<style>\
 			table {\
 			    font-family: arial, sans-serif;\
 			    border-collapse: collapse;\
@@ -128,8 +139,29 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 			tr:nth-child(even) {\
 			    background-color: #dddddd;\
 			}\
-			</style>\
-			<table>\
+			.alert {\
+			    padding: 20px;\
+			    background-color: #2196f3;\
+			    color: white;\
+			}\
+			.alert.success {background-color: #4caf50;}\
+			.alert.error {background-color: #f44336;}\
+			.closebtn {\
+			    margin-left: 15px;\
+			    color: white;\
+			    font-weight: bold;\
+			    float: right;\
+			    font-size: 22px;\
+			    line-height: 20px;\
+			    cursor: pointer;\
+			    transition: 0.3s;\
+			}\
+			.closebtn:hover {\
+			    color: black;\
+			}\
+			</style>");
+	
+	strcpy(send_dir, "<table>\
 			<tr>\
 				<th>Directory</th>\
 			</tr>");
@@ -142,58 +174,58 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	char file_name[200];
 	char file_path[202];
 	
-	if ((directory = opendir(resource_dir)) != NULL) {
-		// Read items in directory
-		while ((entry = readdir(directory)) != NULL) {
-			// Format the link correctly
-			if (strcmp(resource, "/") != 0) {
-				strcpy(file_name, resource);
-				strcat(file_name, "/");
-			} else {
-				strcpy(file_name, "/");
-			}
-			strcat(file_name, entry->d_name);
-			strcpy(file_path, "..");
-			strcat(file_path, file_name);
-			// Make .. directories link to the directory above, e.g.:
-			// '../src/..' --> '..'
-			/*
-			if (strcmp(entry->d_name, "..") == 0
-					&& strlen(file_name) > 2) { // Don't link to outside the top level
-				char *ptr = NULL;
-				if ((ptr = strrchr(file_name, '/')) != NULL) {
-					*ptr = '\0';
-					if ((ptr = strrchr(file_name, '/')) != NULL) {
-						*ptr = '\0';
-					} 
-				} else {
-					perror("strrchr");
-					return -1;
-				}
-			}*/
-			// Fetch stats on the file/directory
-			if (stat(file_path, &file_stats) != 0) {
-				perror("stat");
-				return -1;
-			}
-			// Create HTML link to file/directory
-			// printf("name: %s, type: %s, size: %ld, links: %lu\n", file_name, entry->d_type == DT_DIR ? "dir" : "file", file_stats.st_size, file_stats.st_nlink);
-			if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0) { // Directory and not "."
-				sprintf(httpline, "<tr><td><a href=\"%s\">%s</a><br></td></tr>", file_name, entry->d_name);
-				strcat(send_dir, httpline);
-			} else if (entry->d_type == DT_REG // File
-					&& !(file_stats.st_mode & S_IXUSR) // Not executable
-					&& (entry->d_name[0] != '.')) { // Doesn't start with "."
-				sprintf(httpline, "<tr><td><a href=\"%s\">%s</a></td><td>%ld bytes</td></tr>", file_name, entry->d_name, file_stats.st_size);
-				strcat(send_files, httpline);
-			}
-		}
-	} else {
+	if ((directory = opendir(resource_dir)) == NULL) {
 		// Error 500
 		fprintf(stderr, "Cannot find file/directory %s\n", resource);
 		if (send_response(s, error500, error500http) != 0) {
 			perror("send_response error500");
 			return -1;
+		}
+	}
+	
+	// Read items in directory
+	while ((entry = readdir(directory)) != NULL) {
+		// Format the link correctly
+		if (strcmp(resource, "/") != 0) {
+			strcpy(file_name, resource);
+			strcat(file_name, "/");
+		} else {
+			strcpy(file_name, "/");
+		}
+		strcat(file_name, entry->d_name);
+		strcpy(file_path, "..");
+		strcat(file_path, file_name);
+		// Make .. directories link to the directory above, e.g.:
+		// '../src/..' --> '..'
+		/*
+		if (strcmp(entry->d_name, "..") == 0
+				&& strlen(file_name) > 2) { // Don't link to outside the top level
+			char *ptr = NULL;
+			if ((ptr = strrchr(file_name, '/')) != NULL) {
+				*ptr = '\0';
+				if ((ptr = strrchr(file_name, '/')) != NULL) {
+					*ptr = '\0';
+				} 
+			} else {
+				perror("strrchr");
+				return -1;
+			}
+		}*/
+		// Fetch stats on the file/directory
+		if (stat(file_path, &file_stats) != 0) {
+			perror("stat");
+			return -1;
+		}
+		// Create HTML link to file/directory
+		// printf("name: %s, type: %s, size: %ld, links: %lu\n", file_name, entry->d_type == DT_DIR ? "dir" : "file", file_stats.st_size, file_stats.st_nlink);
+		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0) { // Directory and not "."
+			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a><br></td></tr>", file_name, entry->d_name);
+			strcat(send_dir, httpline);
+		} else if (entry->d_type == DT_REG // File
+				&& !(file_stats.st_mode & S_IXUSR) // Not executable
+				&& (entry->d_name[0] != '.')) { // Doesn't start with "."
+			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a></td><td>%ld bytes</td></tr>", file_name, entry->d_name, file_stats.st_size);
+			strcat(send_files, httpline);
 		}
 	}
 	
@@ -208,16 +240,24 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	//printf("UPDATE: %s\n", update ? "true" : "false");
 	if (update) {
 		printf("RESP: %s\n", response);
-		strcat(upload_files, response);
+		//strcat(upload_files, response);
+		char alert[BUFFER_SIZE];
+		sprintf(alert, "<div class=\"alert %s\">\
+				<span class=\"closebtn\" onclick=\"this.parentElement.style.display='none';\">&times;</span> \
+				%s\
+			</div>", strstr(response, "Success") ? "success" : "error", response);
+		strcat(css, alert);
 	}
-	char *send = malloc(strlen(send_dir) + strlen(send_files) + strlen(upload_files) + 1);
-	strcpy(send, send_dir);
+	char *send = malloc(strlen(css) + strlen(send_dir) + strlen(send_files) + strlen(upload_files) + 1);
+	strcpy(send, css);
+	strcat(send, send_dir);
 	strcat(send, send_files);
 	strcat(send, upload_files);
 	if (send_response(s, status200, send) != 0) {
 		perror("send_response");
 		return -1;
 	}
+	free(css);
 	free(send_dir);
 	free(send_files);
 	free(send);
@@ -227,6 +267,8 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		free(response);
 	}
 	closedir(directory);
+	// Not sure if needed
+	free(entry);
 	return 0;
 }
 
@@ -242,17 +284,8 @@ int send_page(char *resource, char *working_dir, struct stat file_stats, const i
 	strcpy(resource_dir, "..");
 	strcat(resource_dir, resource);
 	// Open the directory resource_dir, e.g. ./testdir
-	if ((directory = opendir(resource_dir)) != NULL) {
-		if (list_directory(directory, resource, resource_dir, file_stats, s, update, response) != 0) {
-			perror("list_directory");
-		}
-	} else {
-		// Error 500
-		fprintf(stderr, "Cannot find file/directory %s\n", resource);
-		if (send_response(s, error500, error500http) != 0) {
-			perror("send_response error500");
-			return -1;
-		}
+	if (list_directory(directory, resource, resource_dir, file_stats, s, update, response) != 0) {
+		perror("list_directory");
 	}
 	return 0;
 }
@@ -500,7 +533,7 @@ int parse_http_headers(char *buffer, char **host, char **request, char **resourc
 }
 
 int service_client_socket(const int s, const char * const tag) {
-	int sfd; // Connection info for php server
+	int sfd = -1; // Connection info for php server
 	char buffer[BUFFER_SIZE];
 	memset(buffer, '\0', BUFFER_SIZE);
 	size_t bytes;
@@ -547,6 +580,7 @@ int service_client_socket(const int s, const char * const tag) {
 			// Parse HTTP request:
 			if (parse_http_headers(buffercopy, &host, &request, &resource, &bytes_total) != 0) {
 				perror("parse_http_headers");
+				//close(s);
 				return -1;
 			}
 			//printf("Host: %s, Request: %s, Resource: %s, Content-Length: %d\n", host, request, resource, bytes_total);
@@ -557,10 +591,12 @@ int service_client_socket(const int s, const char * const tag) {
 			//printf("BYTES_READ: %d, BYTES: %ld, HEADERS: %ld\n", bytes_read, bytes, (strstr(buffer, "\r\n\r\n") - buffer));
 			//printf("@@@@@\n%s@@@@@\n%ld\n", strstr(buffer, "\r\n\r\n"), strlen(strstr(buffer, "\r\n\r\n")));
 			
-			if (bytes_total != -1 && bytes_read > bytes_total) {
-				fprintf(stderr, "Incorrect Content-Length:\nbytes_read: %ld, bytes_total: %d\n", bytes, bytes_total);
-				fprintf(stderr, "Closing connection\n");
-				return -1;
+			if (bytes_total != -1 && bytes_read - 4 > bytes_total) {
+				printf("===== BUFFER =====\n%s\n=================\n", buffer);
+				fprintf(stderr, "Incorrect Content-Length:\nbytes: %ld, bytes_read: %d, bytes_total: %d\n", bytes, bytes_read, bytes_total);
+				fprintf(stderr, "CLOSING CONNECTION\n");
+				//close(s);
+				//return -1;
 			}
 		} else {
 			first_read = false;
@@ -592,6 +628,7 @@ int service_client_socket(const int s, const char * const tag) {
 				} else {
 					// Send the file
 					send_file(s, status200, file_buffer, length);
+					free(file_buffer);
 				}
 			} else { // Not a file, so must be a directory
 				send_page(resource, working_dir, file_stats, s, false, "");
@@ -609,6 +646,7 @@ int service_client_socket(const int s, const char * const tag) {
 			fprintf(stderr, "Invalid request: %s", request);
 			if (send_response(s, error501, error501http) == -1) {
 				perror("send_response err501");
+				//close(s);
 				return -1;
 			}
 		}
