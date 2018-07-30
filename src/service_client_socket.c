@@ -91,6 +91,15 @@ int send_file(const int s, char *header, char *file, long length) {
 	free(file);
 	return 0;
 }
+
+// Function passed to qsort to use strcmp
+int cmpstr(const void *a, const void *b) 
+{ 
+    const char **ia = (const char **)a;
+    const char **ib = (const char **)b;
+    return strcmp(*ia, *ib);
+} 
+
 /*
 Creates the HTML that displays the files and directories within a directory
 resource = "/" or "/uploads"
@@ -115,15 +124,55 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		return -1;
 	}
 	
-	// Find number of files in directory
-	int num_files = 0;
-	while ((entry = readdir(directory)) != NULL) num_files++; 
-	printf("Number of files: %d\n", num_files);
+	// Find number of directories (-2)
+	// Find number of files
+	// Allocate array for files, array for directories
+	// *files[num_files]
+	// *dirs[num_dirs]
+	// Sort them independently with qsort
 	
+	// Find number of files in directory
+	char httpline[200];
+	char file_name[200];
+	char file_path[202];
+	int num_files = 0;
+	int num_dirs = 0;
+	
+	while ((entry = readdir(directory)) != NULL) {
+		if (strcmp(resource, "/") != 0) {
+			strcpy(file_name, resource);
+			strcat(file_name, "/");
+		} else {
+			strcpy(file_name, "/");
+		}
+		strcat(file_name, entry->d_name);
+		strcpy(file_path, "..");
+		strcat(file_path, file_name);
+		// Fetch stats on the file/directory
+		if (stat(file_path, &file_stats) != 0) {
+			perror("stat");
+			return -1;
+		}
+		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 // Directory and not "."
+				&& strcmp(entry->d_name, "..") != 0) { // Not ".." either
+			num_dirs++;
+		} else if (entry->d_type == DT_REG // File
+				&& !(file_stats.st_mode & S_IXUSR) // Not executable
+				&& (entry->d_name[0] != '.')) { // Doesn't start with "."
+			num_files++;
+		}
+	}
 	closedir(directory);
-
+	
+	printf("num_dirs: %d, num_files: %d\n", num_dirs, num_files);
+	
+	//char *dirs[num_dirs];
+	char **dirs = malloc(num_dirs * sizeof(char*));
+	//char *files[num_files];
+	char **files = malloc(num_files * sizeof(char*));
+	
 	char *css = malloc(BUFFER_SIZE);
-	char *send_dir = malloc(BUFFER_SIZE + 256 * num_files);
+	char *send_dir = malloc(BUFFER_SIZE + 256 * num_dirs);
 	char *send_files = malloc(BUFFER_SIZE + 256 * num_files);
 	char *upload_files = malloc(BUFFER_SIZE);
 	// Format the beginning of the HTML
@@ -198,9 +247,6 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 				<th>File</th>\
 				<th>Size</th>\
 			</tr>");
-	char httpline[200];
-	char file_name[200];
-	char file_path[202];
 	
 	if ((directory = opendir(resource_dir)) == NULL) {
 		// Error 500
@@ -211,6 +257,9 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		}
 		return -1;
 	}
+	
+	int count_dirs = 0;
+	int count_files = 0;
 	
 	// Read items in directory
 	while ((entry = readdir(directory)) != NULL) {
@@ -224,22 +273,6 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		strcat(file_name, entry->d_name);
 		strcpy(file_path, "..");
 		strcat(file_path, file_name);
-		// Make .. directories link to the directory above, e.g.:
-		// '../src/..' --> '..'
-		/*
-		if (strcmp(entry->d_name, "..") == 0
-				&& strlen(file_name) > 2) { // Don't link to outside the top level
-			char *ptr = NULL;
-			if ((ptr = strrchr(file_name, '/')) != NULL) {
-				*ptr = '\0';
-				if ((ptr = strrchr(file_name, '/')) != NULL) {
-					*ptr = '\0';
-				} 
-			} else {
-				perror("strrchr");
-				return -1;
-			}
-		}*/
 		// Fetch stats on the file/directory
 		if (stat(file_path, &file_stats) != 0) {
 			perror("stat");
@@ -250,14 +283,41 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 // Directory and not "."
 				&& strcmp(entry->d_name, "..") != 0) { // Not ".." either
 			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a><br></td></tr>", file_name, entry->d_name);
-			strcat(send_dir, httpline);
+			
+			dirs[count_dirs] = strdup(httpline);
+			
+			count_dirs++;
 		} else if (entry->d_type == DT_REG // File
 				&& !(file_stats.st_mode & S_IXUSR) // Not executable
 				&& (entry->d_name[0] != '.')) { // Doesn't start with "."
 			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a></td><td>%ld bytes</td></tr>", file_name, entry->d_name, file_stats.st_size);
-			strcat(send_files, httpline);
+			
+			files[count_files] = strdup(httpline);
+			
+			count_files++;
 		}
 	}
+	printf("\nBefore: \n");
+	for (int i = 0; i < num_dirs; i++) {
+		printf("%s\n", dirs[i]);
+	}
+	qsort(dirs, num_dirs, sizeof(char*), cmpstr);
+	printf("\nAfter: \n");
+	for (int i = 0; i < num_dirs; i++) {
+		printf("%s\n", dirs[i]);
+	}
+	qsort(files, num_files, sizeof(char*), cmpstr);
+	
+	for (int i = 0; i < num_dirs; i++) {
+		strcat(send_dir, dirs[i]);
+		free(dirs[i]);
+	}
+	for (int i = 0; i < num_files; i++) {
+		strcat(send_files, files[i]);
+		free(files[i]);
+	}
+	free(dirs);
+	free(files);
 	
 	// Send data
 	strcat(send_dir, "</table>");
