@@ -105,11 +105,14 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	
 	if ((directory = opendir(resource_dir)) == NULL) {
 		// Error 500
-		fprintf(stderr, "Cannot find file/directory %s\n", resource);
+		fprintf(stderr, "Cannot find file/directory1 %s\n", resource);
 		if (send_response(s, error500, error500http) != 0) {
 			perror("send_response error500");
 			return -1;
 		}
+		free(resource_dir);
+		if (update) free(response);
+		return -1;
 	}
 	
 	// Find number of files in directory
@@ -161,10 +164,35 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 			}\
 			</style>");
 	
-	strcpy(send_dir, "<table>\
+	printf("RESOURCE: %s\n", resource);
+	
+	char *resource_copy = strdup(resource);
+	char path_to_dir[BUFFER_SIZE];
+	char tmp[200];
+	char *token;
+	char path[200];
+	strcpy(path, "");
+	strcpy(path_to_dir, "&#160;&#160;&#160;<a href=\"/\">home</a>");
+	token = strtok(resource_copy, "/");
+	while (token != NULL) {
+		strcat(path, "/");
+		strcat(path, token);
+		
+		//printf("Dir: %s\n", token);
+		//printf("Path: %s\n", path);
+		
+		sprintf(tmp, "&#160;&#160;&#160;>&#160;&#160;&#160;<a href=\"%s\">%s</a>", path, token);
+		//printf("%s\n", tmp);
+		strcat(path_to_dir, tmp);
+		
+		token = strtok(NULL, "/");
+	}
+	free(resource_copy);
+	
+	sprintf(send_dir, "<table>\
 			<tr>\
-				<th>Directory</th>\
-			</tr>");
+				<th>Directory   %s</th>\
+			</tr>", path_to_dir);
 	strcpy(send_files, "<table>\
 			<tr>\
 				<th>File</th>\
@@ -176,11 +204,12 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	
 	if ((directory = opendir(resource_dir)) == NULL) {
 		// Error 500
-		fprintf(stderr, "Cannot find file/directory %s\n", resource);
+		fprintf(stderr, "Cannot find file/directory2 %s\n", resource);
 		if (send_response(s, error500, error500http) != 0) {
 			perror("send_response error500");
 			return -1;
 		}
+		return -1;
 	}
 	
 	// Read items in directory
@@ -218,7 +247,8 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		}
 		// Create HTML link to file/directory
 		// printf("name: %s, type: %s, size: %ld, links: %lu\n", file_name, entry->d_type == DT_DIR ? "dir" : "file", file_stats.st_size, file_stats.st_nlink);
-		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0) { // Directory and not "."
+		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 // Directory and not "."
+				&& strcmp(entry->d_name, "..") != 0) { // Not ".." either
 			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a><br></td></tr>", file_name, entry->d_name);
 			strcat(send_dir, httpline);
 		} else if (entry->d_type == DT_REG // File
@@ -242,10 +272,18 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		printf("RESP: %s\n", response);
 		//strcat(upload_files, response);
 		char alert[BUFFER_SIZE];
+		char type[20];
+		if (strstr(response, "Success") && strstr(response, "Error")) {
+			strcpy(type, "");
+		} else if (strstr(response, "Success")) {
+			strcpy(type, "success");
+		} else {
+			strcpy(type, "error");
+		}
 		sprintf(alert, "<div class=\"alert %s\">\
 				<span class=\"closebtn\" onclick=\"this.parentElement.style.display='none';\">&times;</span> \
 				%s\
-			</div>", strstr(response, "Success") ? "success" : "error", response);
+			</div>", type, response);
 		strcat(css, alert);
 	}
 	char *send = malloc(strlen(css) + strlen(send_dir) + strlen(send_files) + strlen(upload_files) + 1);
@@ -286,6 +324,7 @@ int send_page(char *resource, char *working_dir, struct stat file_stats, const i
 	// Open the directory resource_dir, e.g. ./testdir
 	if (list_directory(directory, resource, resource_dir, file_stats, s, update, response) != 0) {
 		perror("list_directory");
+		return -1;
 	}
 	return 0;
 }
