@@ -132,9 +132,10 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	// Sort them independently with qsort
 	
 	// Find number of files in directory
-	char httpline[200];
+	char httpline[300];
 	char file_name[200];
 	char file_path[202];
+	char tmp[200];
 	int num_files = 0;
 	int num_dirs = 0;
 	
@@ -164,7 +165,7 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	}
 	closedir(directory);
 	
-	printf("num_dirs: %d, num_files: %d\n", num_dirs, num_files);
+	//printf("num_dirs: %d, num_files: %d\n", num_dirs, num_files);
 	
 	//char *dirs[num_dirs];
 	char **dirs = malloc(num_dirs * sizeof(char*));
@@ -180,7 +181,7 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 			table {\
 			    font-family: arial, sans-serif;\
 			    border-collapse: collapse;\
-			    width: 50%;\
+			    width: 70%;\
 		    	    margin: 25px;\
 			}\
 			td, th {\
@@ -211,18 +212,45 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 			.closebtn:hover {\
 			    color: black;\
 			}\
-			</style>");
+			input[type=submit].upload {\
+			}\
+			input[type=submit].delete {\
+				border: none;\
+				background-color: transparent;\
+				padding: 0px;\
+				transition: 0.3s;\
+				font-weight: bold;\
+				line-height: 20px;\
+				font-size: 30px;\
+				float: right;\
+			}\
+			input[type=submit].delete:hover {\
+				color: red\
+			}\
+		</style>\
+		<script>\
+			function confirm_delete(n) {\
+				confirm(\"Are you sure you want to delete \" + n + \"?\");\
+			}\
+		</script>");
 	
-	printf("RESOURCE: %s\n", resource);
+	//printf("RESOURCE: %s\n", resource);
 	
+	// Create the path to the current directory next to the Directory heading
 	char *resource_copy = strdup(resource);
 	char path_to_dir[BUFFER_SIZE];
-	char tmp[200];
 	char *token;
 	char path[200];
 	strcpy(path, "");
 	strcpy(path_to_dir, "&#160;&#160;&#160;<a href=\"/\">home</a>");
 	token = strtok(resource_copy, "/");
+	// Check whether we are in the uploads folder 
+	//printf("TOK: %s\n", token);
+	bool uploads = false;
+	if (token != NULL) {
+		uploads = (strcmp(token, "uploads") == 0);
+	}
+	//printf("Uploads: %s\n", uploads ? "true" : "false");
 	while (token != NULL) {
 		strcat(path, "/");
 		strcat(path, token);
@@ -239,14 +267,21 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	free(resource_copy);
 	
 	sprintf(send_dir, "<table>\
+			<col width=\"90%%\">\
+			<col width=\"10%%\">\
 			<tr>\
 				<th>Directory   %s</th>\
-			</tr>", path_to_dir);
-	strcpy(send_files, "<table>\
+				%s\
+			</tr>", path_to_dir, uploads ? "<th>Delete</th>" : "");
+	sprintf(send_files, "<table>\
+			<col width=\"70%%\">\
+			<col width=\"20%%\">\
+			<col width=\"10%%\">\
 			<tr>\
 				<th>File</th>\
 				<th>Size</th>\
-			</tr>");
+				%s\
+			</tr>", uploads ? "<th>Delete</th>" : "");
 	
 	if ((directory = opendir(resource_dir)) == NULL) {
 		// Error 500
@@ -282,7 +317,12 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		// printf("name: %s, type: %s, size: %ld, links: %lu\n", file_name, entry->d_type == DT_DIR ? "dir" : "file", file_stats.st_size, file_stats.st_nlink);
 		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 // Directory and not "."
 				&& strcmp(entry->d_name, "..") != 0) { // Not ".." either
-			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a><br></td></tr>", file_name, entry->d_name);
+			sprintf(tmp, "<td><form action=\"%s/delete.php?file=%s&path=%s\" method=\"post\" onclick=\"return confirm('Are you sure you want to delete %s and all of its contents?');\">\
+	  			<input type=\"submit\" class=\"delete\" value=\"&times;\">\
+				</form></td>", resource, entry->d_name, resource, entry->d_name);
+			
+			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a><br></td>%s</tr>", 
+				file_name, entry->d_name, uploads ? tmp : "");
 			
 			dirs[count_dirs] = strdup(httpline);
 			
@@ -290,22 +330,31 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		} else if (entry->d_type == DT_REG // File
 				&& !(file_stats.st_mode & S_IXUSR) // Not executable
 				&& (entry->d_name[0] != '.')) { // Doesn't start with "."
-			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a></td><td>%ld bytes</td></tr>", file_name, entry->d_name, file_stats.st_size);
+			sprintf(tmp, "<td><form action=\"%s/delete.php?file=%s&path=%s\" method=\"post\" onclick=\"return confirm('Are you sure you want to delete %s?');\">\
+	  			<input type=\"submit\" class=\"delete\" value=\"&times;\">\
+				</form></td>", resource, entry->d_name, resource, entry->d_name);
+			
+			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a></td><td>%ld bytes</td>%s</tr>", 
+				file_name, entry->d_name, file_stats.st_size, uploads ? tmp : "");
 			
 			files[count_files] = strdup(httpline);
 			
 			count_files++;
 		}
 	}
+	/*
 	printf("\nBefore: \n");
 	for (int i = 0; i < num_dirs; i++) {
 		printf("%s\n", dirs[i]);
 	}
+	*/
 	qsort(dirs, num_dirs, sizeof(char*), cmpstr);
+	/*
 	printf("\nAfter: \n");
 	for (int i = 0; i < num_dirs; i++) {
 		printf("%s\n", dirs[i]);
 	}
+	*/
 	qsort(files, num_files, sizeof(char*), cmpstr);
 	
 	for (int i = 0; i < num_dirs; i++) {
@@ -461,16 +510,24 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 	
 	// Edit the headers being sent to the php server
 	if (first_read) {
+		char php[20];
+		if (strstr(resource, "upload.php") != NULL) {
+			strcpy(php, "upload.php");
+		} else if (strstr(resource, "delete.php") != NULL) {
+			strcpy(php, "delete.php");
+		}
 		//printf("\nHEADERS\n\n");
 		char path[BUFFER_SIZE];
 		char *ptr = NULL;
+		
 	
 		// Find the correct path, e.g. /src/upload.php --> /src/
 		ptr = strstr(msg, "/");
 		strcpy(path, ptr);
 		strtok(path, "\n");
+		//printf("PHP: %s\n", php);
 		//printf("PATH: \n%s\n", path);
-		ptr = strstr(path, "upload.php");
+		ptr = strstr(path, php);
 		*ptr = '\0';
 		//printf("PATH: \n%s\n", path);
 		strcpy(resource, path);
@@ -498,6 +555,8 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 		
 		len -= strlen(path) - 1;
 	}
+	
+	//printf("\n----------\n%s\n----------\n", msg);
 
 	if (write(sfd, msg, len) != len) {
 		fprintf(stderr, "partial/failed write\n");
@@ -510,7 +569,7 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 			return -1;
 		}
 		buffer[nread] = '\0';
-		printf("Received %zd bytes: %s\n", nread, buffer);
+		//printf("Received %zd bytes: %s\n", nread, buffer);
 		// Check response from php server
 		
 		// Remove headers from response
