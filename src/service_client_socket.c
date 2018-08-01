@@ -172,7 +172,7 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	//char *files[num_files];
 	char **files = malloc(num_files * sizeof(char*));
 	
-	char *css = malloc(BUFFER_SIZE);
+	char *css = malloc(BUFFER_SIZE + strlen(response));
 	char *send_dir = malloc(BUFFER_SIZE + 256 * num_dirs);
 	char *send_files = malloc(BUFFER_SIZE + 256 * num_files);
 	char *upload_files = malloc(BUFFER_SIZE);
@@ -188,6 +188,9 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 			    border: 1px solid #dddddd;\
 			    text-align: left;\
 			    padding: 8px;\
+			}\
+			td.size {\
+				text-align: right;\
 			}\
 			tr:nth-child(even) {\
 			    background-color: #dddddd;\
@@ -212,9 +215,14 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 			.closebtn:hover {\
 			    color: black;\
 			}\
-			input[type=submit].upload {\
+			input {\
+				font-family: arial, sans-serif;\
+			}\
+			input[type=text] {\
+				margin-left: 25px;\
 			}\
 			input[type=submit].delete {\
+				margin: 0px;\
 				border: none;\
 				background-color: transparent;\
 				padding: 0px;\
@@ -227,12 +235,7 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 			input[type=submit].delete:hover {\
 				color: red\
 			}\
-		</style>\
-		<script>\
-			function confirm_delete(n) {\
-				confirm(\"Are you sure you want to delete \" + n + \"?\");\
-			}\
-		</script>");
+		</style>");
 	
 	//printf("RESOURCE: %s\n", resource);
 	
@@ -318,10 +321,10 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 // Directory and not "."
 				&& strcmp(entry->d_name, "..") != 0) { // Not ".." either
 			sprintf(tmp, "<td><form action=\"%s/delete.php?file=%s&path=%s\" method=\"post\" onclick=\"return confirm('Are you sure you want to delete %s and all of its contents?');\">\
-	  			<input type=\"submit\" class=\"delete\" value=\"&times;\">\
+	  			<input type=\"submit\" class=\"delete\" value=\"&#160;&#160;&#160;&times;&#160;&#160;&#160;\">\
 				</form></td>", resource, entry->d_name, resource, entry->d_name);
 			
-			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a><br></td>%s</tr>", 
+			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a></td>%s</tr>", 
 				file_name, entry->d_name, uploads ? tmp : "");
 			
 			dirs[count_dirs] = strdup(httpline);
@@ -331,10 +334,10 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 				&& !(file_stats.st_mode & S_IXUSR) // Not executable
 				&& (entry->d_name[0] != '.')) { // Doesn't start with "."
 			sprintf(tmp, "<td><form action=\"%s/delete.php?file=%s&path=%s\" method=\"post\" onclick=\"return confirm('Are you sure you want to delete %s?');\">\
-	  			<input type=\"submit\" class=\"delete\" value=\"&times;\">\
+	  			<input type=\"submit\" class=\"delete\" value=\"&#160;&#160;&#160;&times;&#160;&#160;&#160;\">\
 				</form></td>", resource, entry->d_name, resource, entry->d_name);
 			
-			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a></td><td>%ld bytes</td>%s</tr>", 
+			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a></td><td class=\"size\">%ld bytes</td>%s</tr>", 
 				file_name, entry->d_name, file_stats.st_size, uploads ? tmp : "");
 			
 			files[count_files] = strdup(httpline);
@@ -369,25 +372,38 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	free(files);
 	
 	// Send data
-	strcat(send_dir, "</table>");
-	strcat(send_files, "</table><br><br>");
-	sprintf(upload_files, "<form action=\"%s/upload.php\" method=\"post\" enctype=\"multipart/form-data\">\
-  			Select files: \
-  			<input type=\"file\" name=\"file_to_upload[]\" id=\"file_to_upload\" multiple><br><br>\
-  			<input type=\"submit\" value=\"Upload\" name=\"submit\">\
-			</form>", resource);
+	sprintf(tmp, "</table>\
+			<form action=\"%s/mkdir.php?path=%s\" method=\"post\">\
+				<input type=\"text\" name=\"name\" placeholder=\"Directory name\" size=\"10\">\
+	  			<input type=\"submit\" value=\"Create Directory\">\
+			</form>", resource, resource);
+	strcat(send_dir, uploads ? tmp : "</table>");
+	strcat(send_files, "</table>");
+	if (uploads) {
+		sprintf(upload_files, "<form action=\"%s/upload.php?path=%s\" method=\"post\" enctype=\"multipart/form-data\">\
+			  			<span style=\"padding-left:25px;font-family: arial, sans-serif;\">Select files: </span>\
+			  			<input type=\"file\" name=\"file_to_upload[]\" id=\"file_to_upload\" multiple>\
+			  			<input type=\"submit\" value=\"Upload Here\" name=\"submit\">\
+					</form>", resource, resource);
+	} else {
+		sprintf(upload_files, "<span style=\"padding-left:25px;font-family: arial, sans-serif;\">\
+						See the <a href=\"uploads\">uploads</a> directory to use the file server.\
+					</span>");
+	}
 	//printf("UPDATE: %s\n", update ? "true" : "false");
 	if (update) {
 		printf("RESP: %s\n", response);
 		//strcat(upload_files, response);
-		char alert[BUFFER_SIZE];
+		char alert[BUFFER_SIZE + strlen(response)];
 		char type[20];
 		if (strstr(response, "Success") && strstr(response, "Error")) {
 			strcpy(type, "");
 		} else if (strstr(response, "Success")) {
 			strcpy(type, "success");
-		} else {
+		} else if (strstr(response, "Error")) {
 			strcpy(type, "error");
+		} else {
+			strcpy(type, "");
 		}
 		sprintf(alert, "<div class=\"alert %s\">\
 				<span class=\"closebtn\" onclick=\"this.parentElement.style.display='none';\">&times;</span> \
@@ -491,7 +507,7 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 	int j;
 	size_t len;
 	ssize_t nread;
-	char buffer[BUFFER_SIZE];
+	char buffer[BUFFER_SIZE * 2];
 	
 	/* Send remaining command-line arguments as separate
 	datagrams, and read responses from server */
@@ -515,6 +531,8 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 			strcpy(php, "upload.php");
 		} else if (strstr(resource, "delete.php") != NULL) {
 			strcpy(php, "delete.php");
+		} else if (strstr(resource, "mkdir.php") != NULL) {
+			strcpy(php, "mkdir.php");
 		}
 		//printf("\nHEADERS\n\n");
 		char path[BUFFER_SIZE];
@@ -563,7 +581,7 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 		return -1;
 	}
 	if (!uploading) {
-		nread = read(sfd, buffer, BUFFER_SIZE);
+		nread = read(sfd, buffer, BUFFER_SIZE * 2);
 		if (nread == -1) {
 			perror("read");
 			return -1;

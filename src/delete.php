@@ -15,16 +15,16 @@ $path = ".." . $_GET["path"];
 // Check that $path starts with /uploads
 // Go into directory $path, delete file/dir $file
 if (is_dir("$path/$file")) { // Delete directory
-	if (delTree($file)) {
-		echo "Success: Directory " . $file . " has been deleted";
+	if (delTree("$path/$file")) {
+		echo "<b>Success</b>: Directory " . $file . " has been deleted";
 	} else {
-		echo "Error: Could not delete directory " . $file;
+		echo "<b>Error</b>: Could not delete directory " . $file;
 	}
 } else { // Delete file
 	if (unlink("$path/$file")) {
-		echo "Success: File " . $file . " has been deleted";
+		echo "<b>Success</b>: File " . $file . " has been deleted";
 	} else {
-		echo "Error: Could not delete file " . $file;
+		echo "<b>Error</b>: Could not delete file " . $file;
 	}
 }
 ?>
