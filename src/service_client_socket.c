@@ -578,7 +578,7 @@ int connect_php(int *sfd) {
 	hints.ai_flags = 0;
 	hints.ai_protocol = 0;          /* Any protocol */
 
-	s = getaddrinfo("127.0.0.1", "8000", &hints, &result);
+	s = getaddrinfo("localhost", "8000", &hints, &result);
 	if (s != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
 		perror("Could not connect to php server");
