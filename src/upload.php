@@ -2,11 +2,9 @@
 $total = count($_FILES["file_to_upload"]["name"]);
 $path = $_GET["path"];
 $target_dir = ".." . $path . "/";
-echo $target_dir . "<br>";
 
 for ($i = 0; $i < $total; $i++) {
 	$target_file = $target_dir . basename($_FILES["file_to_upload"]["name"][$i]);
-	echo $target_file . "<br>";
 	$uploadOk = 1;
 	$error = "";
 	

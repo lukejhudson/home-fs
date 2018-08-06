@@ -10,6 +10,11 @@
 #include "make_printable_addr.h"
 #include "service_client_socket.h"
 
+#include <signal.h>
+
+FILE *fp;
+pthread_mutex_t mut;
+
 typedef struct thread_control_block {
 	int client;
 	struct sockaddr_in6 their_address;
@@ -24,14 +29,41 @@ static void *client_thread(void *data) {
 	printable = make_printable_addr(&(tcb_p->their_address),
 			tcb_p->their_address_size, buffer, sizeof(buffer));
 	// Handle the connection
-	service_client_socket(tcb_p->client, printable);
+	service_client_socket(tcb_p->client, printable, fp, mut);
 
 	free(printable); // strdup'd
 	free(data); //malloc'd
 	pthread_exit(0);
 }
 
+void sig_handler(int signo) {
+	if (signo == SIGINT) {
+		perror("SIGINT received");
+	} else if (signo == SIGTERM) {
+		perror("SIGTERM received");
+	}
+	if (fp == NULL) {
+		exit(0);
+	} else {
+		if (fclose(fp) == EOF) {
+			perror("fclose");
+			exit(1);
+		}
+	}
+	exit(0);
+}
+
 int main(int argc, char **argv) {
+	// Signal handling
+	if (signal(SIGINT, sig_handler) == SIG_ERR) {
+		perror("catching SIGINT");
+		exit(1);
+	}
+	if (signal(SIGTERM, sig_handler) == SIG_ERR) {
+		perror("catching SIGTERM");
+		exit(1);
+	}
+	
 	// Checking arguments
 	char *myname = argv[0];
 	if (argc != 2) {
@@ -46,6 +78,11 @@ int main(int argc, char **argv) {
 	}
 	if (port < 1024 || port > 65535) {
 		perror("Port must be between 1024 and 65535\n");
+		exit(1);
+	}
+	
+	if ((fp = fopen("server.log", "a")) == NULL) {
+		fprintf(stderr, "Failed to open file server.log\n");
 		exit(1);
 	}
 

@@ -12,6 +12,9 @@
 
 #include <dirent.h>
 #include <sys/stat.h>
+#include <pthread.h>
+
+#include <time.h>
 
 #define BUFFER_SIZE 2048
 // Status codes for messages which are commonly sent
@@ -20,6 +23,17 @@ char error500[] = "HTTP/1.1 500 Internal Server Error\nContent-Length: %d\n\n";
 char error500http[] = "<html><body><h1>Error 500 Internal Server Error</h1></body></html>";
 char error501[] = "HTTP/1.1 501 Not Implemented\nContent-Length: %d\n\n";
 char error501http[] = "<html><body><h1>Error 501 Not Implemented</h1></body></html>";
+FILE *log_fp; // File pointer for the log file
+pthread_mutex_t log_mut; // Lock for the log file
+
+int write_log(char *info) {
+	time_t t = time(NULL);
+	struct tm tm = *localtime(&t);
+	pthread_mutex_lock (&log_mut);
+	fprintf(log_fp, "[%d:%d:%d  %d-%d-%d] %s\n", tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, info);
+	fflush(log_fp);
+	pthread_mutex_unlock (&log_mut);
+}
 
 /* Reads a file file and places the contents of the file in file_buffer and the length in length.*/
 int read_file(char *file, long *length, char **file_buffer) {
@@ -27,26 +41,37 @@ int read_file(char *file, long *length, char **file_buffer) {
 	if ((fp = fopen(file, "rb")) == NULL) {
 		// 404 File Not Found
 		perror("Failed to open file");
+		char tmp[200];
+		sprintf(tmp, "read_file: Failed to open file (length: %ld): %s", *length, file);
+		write_log(tmp);
 		return -1;
 	} else {
 		// 200 OK
 		if (fseek(fp, 0, SEEK_END) != 0) { // Seek last byte
 			perror("fseek");
+			write_log("read_file: fseek failed");
 			return -1;
-		} else if (((*length = ftell(fp)) <= 0)) { // Find length from beginning to end of file
+		} else if (((*length = ftell(fp)) < 0)) { // Find length from beginning to end of file
 			perror("ftell");
+			char tmp[200];
+			sprintf(tmp, "read_file: ftell failed, length: %ld", *length);
+			write_log(tmp);
 			return -1;
 		} else if (fseek(fp, 0, SEEK_SET) != 0) { // Go back to the beginning of the file
 			perror("fseek");
+			write_log("read_file: fseek failed");
 			return -1;
 		} else if (((*file_buffer = malloc(*length + 1)) == NULL)) { // Allocate memory for string to store the file
 			perror("malloc");
+			write_log("read_file: malloc failed");
 			return -1;
 		} else if (fread(*file_buffer, 1, *length, fp) != *length) { // Read whole file into string
 			perror("fread");
+			write_log("read_file: fread failed");
 			return -1;
 		} else if (fclose(fp) != 0) { // Close the file
 			perror("fclose");
+			write_log("read_file: fclose failed");
 			return -1;
 		}
 	}
@@ -64,6 +89,9 @@ int send_response(const int s, char *header, char *body) {
 	// Send the whole message
 	if (write(s, send, strlen(send)) != strlen(send)) {
 		perror("write");
+		char tmp[BUFFER_SIZE];
+		sprintf(tmp, "send_response: Failed to write message:\nheader:\n%s\nbody:\n%s", header, body);
+		write_log(tmp);
 		free(send);
 		return -1;
 	}
@@ -80,11 +108,17 @@ int send_file(const int s, char *header, char *file, long length) {
 	// Send the header
 	if (write(s, send, strlen(send)) != strlen(send)) {
 		perror("write");
+		char tmp[200 + BUFFER_SIZE];
+		sprintf(tmp, "send_file: Failed to write header:\n%s", header);
+		write_log(tmp);
 		return -1;
 	}
 	// Send the file
 	if (write(s, file, length) != length) {
 		perror("write");
+		char tmp[200 + BUFFER_SIZE];
+		sprintf(tmp, "send_file: Failed to write file (length: %ld):\n%s", length, file);
+		write_log(tmp);
 		return -1;
 	}
 	free(send);
@@ -108,15 +142,20 @@ update = true if the page being sent is a response to a php request (e.g. upload
 response = if update, contains the response from the php server (e.g. error messages)
 	Must be freed
 */
-int list_directory(DIR *directory, char *resource, char *resource_dir, struct stat file_stats, const int s, bool update, char *response) {
+int list_directory(char *resource, char *resource_dir, struct stat file_stats, const int s, bool update, char *response) {
 	// Directory info
+	DIR *directory;
 	struct dirent *entry;
 	
 	if ((directory = opendir(resource_dir)) == NULL) {
 		// Error 500
 		fprintf(stderr, "Cannot find file/directory1 %s\n", resource);
+		char tmp[200];
+		sprintf(tmp, "list_directory: Cannot find file/directory1: resource: %s", resource);
+		write_log(tmp);
 		if (send_response(s, error500, error500http) != 0) {
 			perror("send_response error500");
+			write_log("list_directory: send_response: Failed to send error500 response");
 			return -1;
 		}
 		free(resource_dir);
@@ -152,6 +191,9 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		// Fetch stats on the file/directory
 		if (stat(file_path, &file_stats) != 0) {
 			perror("stat");
+			char tmp[200];
+			sprintf(tmp, "list_directory: stat failed: file_path: %s", file_path);
+			write_log(tmp);
 			return -1;
 		}
 		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 // Directory and not "."
@@ -165,16 +207,12 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	}
 	closedir(directory);
 	
-	//printf("num_dirs: %d, num_files: %d\n", num_dirs, num_files);
-	
-	//char *dirs[num_dirs];
 	char **dirs = malloc(num_dirs * sizeof(char*));
-	//char *files[num_files];
 	char **files = malloc(num_files * sizeof(char*));
 	
 	char *css = malloc(BUFFER_SIZE + strlen(response));
-	char *send_dir = malloc(BUFFER_SIZE + 256 * num_dirs);
-	char *send_files = malloc(BUFFER_SIZE + 256 * num_files);
+	char *send_dir = malloc(BUFFER_SIZE + 512 * num_dirs);
+	char *send_files = malloc(BUFFER_SIZE + 512 * num_files);
 	char *upload_files = malloc(BUFFER_SIZE);
 	// Format the beginning of the HTML
 	strcpy(css, "<style>\
@@ -237,8 +275,6 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 			}\
 		</style>");
 	
-	//printf("RESOURCE: %s\n", resource);
-	
 	// Create the path to the current directory next to the Directory heading
 	char *resource_copy = strdup(resource);
 	char path_to_dir[BUFFER_SIZE];
@@ -248,21 +284,15 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	strcpy(path_to_dir, "&#160;&#160;&#160;<a href=\"/\">home</a>");
 	token = strtok(resource_copy, "/");
 	// Check whether we are in the uploads folder 
-	//printf("TOK: %s\n", token);
 	bool uploads = false;
 	if (token != NULL) {
 		uploads = (strcmp(token, "uploads") == 0);
 	}
-	//printf("Uploads: %s\n", uploads ? "true" : "false");
 	while (token != NULL) {
 		strcat(path, "/");
 		strcat(path, token);
 		
-		//printf("Dir: %s\n", token);
-		//printf("Path: %s\n", path);
-		
 		sprintf(tmp, "&#160;&#160;&#160;>&#160;&#160;&#160;<a href=\"%s\">%s</a>", path, token);
-		//printf("%s\n", tmp);
 		strcat(path_to_dir, tmp);
 		
 		token = strtok(NULL, "/");
@@ -289,8 +319,12 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	if ((directory = opendir(resource_dir)) == NULL) {
 		// Error 500
 		fprintf(stderr, "Cannot find file/directory2 %s\n", resource);
+		char tmp[200];
+		sprintf(tmp, "list_directory: Cannot find file/directory2: resource: %s", resource);
+		write_log(tmp);
 		if (send_response(s, error500, error500http) != 0) {
 			perror("send_response error500");
+			write_log("list_directory: send_response: Failed to send error500 response");
 			return -1;
 		}
 		return -1;
@@ -317,7 +351,6 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 			return -1;
 		}
 		// Create HTML link to file/directory
-		// printf("name: %s, type: %s, size: %ld, links: %lu\n", file_name, entry->d_type == DT_DIR ? "dir" : "file", file_stats.st_size, file_stats.st_nlink);
 		if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 // Directory and not "."
 				&& strcmp(entry->d_name, "..") != 0) { // Not ".." either
 			sprintf(tmp, "<td><form action=\"%s/delete.php?file=%s&path=%s\" method=\"post\" onclick=\"return confirm('Are you sure you want to delete %s and all of its contents?');\">\
@@ -328,7 +361,6 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 				file_name, entry->d_name, uploads ? tmp : "");
 			
 			dirs[count_dirs] = strdup(httpline);
-			
 			count_dirs++;
 		} else if (entry->d_type == DT_REG // File
 				&& !(file_stats.st_mode & S_IXUSR) // Not executable
@@ -341,23 +373,10 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 				file_name, entry->d_name, file_stats.st_size, uploads ? tmp : "");
 			
 			files[count_files] = strdup(httpline);
-			
 			count_files++;
 		}
 	}
-	/*
-	printf("\nBefore: \n");
-	for (int i = 0; i < num_dirs; i++) {
-		printf("%s\n", dirs[i]);
-	}
-	*/
 	qsort(dirs, num_dirs, sizeof(char*), cmpstr);
-	/*
-	printf("\nAfter: \n");
-	for (int i = 0; i < num_dirs; i++) {
-		printf("%s\n", dirs[i]);
-	}
-	*/
 	qsort(files, num_files, sizeof(char*), cmpstr);
 	
 	for (int i = 0; i < num_dirs; i++) {
@@ -390,10 +409,7 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 						See the <a href=\"uploads\">uploads</a> directory to use the file server.\
 					</span>");
 	}
-	//printf("UPDATE: %s\n", update ? "true" : "false");
 	if (update) {
-		printf("RESP: %s\n", response);
-		//strcat(upload_files, response);
 		char alert[BUFFER_SIZE + strlen(response)];
 		char type[20];
 		if (strstr(response, "Success") && strstr(response, "Error")) {
@@ -418,6 +434,7 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 	strcat(send, upload_files);
 	if (send_response(s, status200, send) != 0) {
 		perror("send_response");
+		write_log("list_directory: send_response: Failed to send status200 response");
 		return -1;
 	}
 	free(css);
@@ -430,13 +447,10 @@ int list_directory(DIR *directory, char *resource, char *resource_dir, struct st
 		free(response);
 	}
 	closedir(directory);
-	// Not sure if needed
-	free(entry);
 	return 0;
 }
 
 int send_page(char *resource, char *working_dir, struct stat file_stats, const int s, bool update, char *response) {
-	DIR *directory;
 	// Remove trailing "/"'s
 	while (strlen(resource) > 0 && resource[strlen(resource) - 1] == '/') {
 		resource[strlen(resource) - 1] = '\0';
@@ -447,59 +461,14 @@ int send_page(char *resource, char *working_dir, struct stat file_stats, const i
 	strcpy(resource_dir, "..");
 	strcat(resource_dir, resource);
 	// Open the directory resource_dir, e.g. ./testdir
-	if (list_directory(directory, resource, resource_dir, file_stats, s, update, response) != 0) {
+	if (list_directory(resource, resource_dir, file_stats, s, update, response) != 0) {
 		perror("list_directory");
+		char tmp[200];
+		sprintf(tmp, "send_page: list_directory failed: resource: %s, resource_dir: %s, update: %s, response: %s", 
+			resource, resource_dir, update ? "true" : "false", response);
 		return -1;
 	}
 	return 0;
-}
-
-// You must free the result if result is non-NULL.
-// https://stackoverflow.com/questions/779875/what-is-the-function-to-replace-string-in-c
-char *str_replace(char *orig, char *rep, char *with) {
-	char *result; // the return string
-	char *ins;    // the next insert point
-	char *tmp;    // varies
-	int len_rep;  // length of rep (the string to remove)
-	int len_with; // length of with (the string to replace rep with)
-	int len_front; // distance between rep and end of last rep
-	int count;    // number of replacements
-
-	// sanity checks and initialization
-	if (!orig || !rep)
-		return NULL;
-	len_rep = strlen(rep);
-	if (len_rep == 0)
-		return NULL; // empty rep causes infinite loop during count
-	if (!with)
-	with = "";
-	len_with = strlen(with);
-
-	// count the number of replacements needed
-	ins = orig;
-	for (count = 0; tmp = strstr(ins, rep); ++count) {
-		ins = tmp + len_rep;
-	}
-
-	tmp = result = malloc(strlen(orig) + (len_with - len_rep) * count + 1);
-
-	if (!result)
-		return NULL;
-
-	// first time through the loop, all the variable are set correctly
-	// from here on,
-	//    tmp points to the end of the result string
-	//    ins points to the next occurrence of rep in orig
-	//    orig points to the remainder of orig after "end of rep"
-	while (count--) {
-		ins = strstr(orig, rep);
-		len_front = ins - orig;
-		tmp = strncpy(tmp, orig, len_front) + len_front;
-		tmp = strcpy(tmp, with) + len_with;
-		orig += len_front + len_rep; // move to next "end of rep"
-	}
-	strcpy(tmp, orig);
-	return result;
 }
 
 // http://man7.org/linux/man-pages/man3/getaddrinfo.3.html
@@ -509,20 +478,15 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 	ssize_t nread;
 	char buffer[BUFFER_SIZE * 2];
 	
-	/* Send remaining command-line arguments as separate
-	datagrams, and read responses from server */
-	
-	//msg = str_replace(msg, "localhost:8080", "localhost:8000");
-
-	len = bytes;//strlen(msg);
-	//printf("len: %ld\n", len);
+	len = bytes;
 
 	if (len + 1 > BUFFER_SIZE) {
 		fprintf(stderr, "Can't send to php server; request too large\n");
+		char tmp[200];
+		sprintf(tmp, "run_php: Can't send to php server: Request too large (%ld)", len);
+		write_log(tmp);
 		return -1;
 	}
-	//msg[bytes] = '\0';
-	//printf("\n----------\n%s\n----------\n", msg);
 	
 	// Edit the headers being sent to the php server
 	if (first_read) {
@@ -534,91 +498,72 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 		} else if (strstr(resource, "mkdir.php") != NULL) {
 			strcpy(php, "mkdir.php");
 		}
-		//printf("\nHEADERS\n\n");
 		char path[BUFFER_SIZE];
 		char *ptr = NULL;
 		
-	
 		// Find the correct path, e.g. /src/upload.php --> /src/
 		ptr = strstr(msg, "/");
 		strcpy(path, ptr);
 		strtok(path, "\n");
-		//printf("PHP: %s\n", php);
-		//printf("PATH: \n%s\n", path);
 		ptr = strstr(path, php);
 		*ptr = '\0';
-		//printf("PATH: \n%s\n", path);
 		strcpy(resource, path);
-		//printf("RESOURCE: \n%s\n", resource);
 		
 		// Remove the /src/ part from the message being sent to server
-		//printf("MSG: \n%s\n", msg);
 		ptr = strstr(msg, path);
-		//printf("ptr: %c path: %c\n", ptr[0], path[0]);
 		int i = 0;
 		while (*ptr == path[i]) {
 			i++;
 			ptr++;
-			//printf("ptr: %c path: %c\n", *ptr, path[i]);
 		}
-		//printf("\n\nPTR: \n%s\n%c\n", ptr, *ptr);
 		char tmp[BUFFER_SIZE];
 		strcpy(tmp, msg);
 		strtok(msg, "/");
-		//printf("MSG: \n%s\n", msg);
 		sprintf(tmp, "%s/%s", msg, ptr);
 		strcpy(msg, tmp);
-		//printf("\n\nPTR: \n%s\n", ptr);
-		//printf("MSG: \n%s\n", msg);
 		
 		len -= strlen(path) - 1;
 	}
 	
-	//printf("\n----------\n%s\n----------\n", msg);
 
 	if (write(sfd, msg, len) != len) {
 		fprintf(stderr, "partial/failed write\n");
+		write_log("run_php: Failed write");
 		return -1;
 	}
 	if (!uploading) {
+		// Check response from php server
 		nread = read(sfd, buffer, BUFFER_SIZE * 2);
 		if (nread == -1) {
 			perror("read");
+			write_log("run_php: Failed read");
 			return -1;
 		}
 		buffer[nread] = '\0';
-		//printf("Received %zd bytes: %s\n", nread, buffer);
-		// Check response from php server
-		
 		// Remove headers from response
-		//printf("strstr response\n");
 		char *response;
 		if (nread != 0 && (response = strstr(buffer, "\r\n\r\n") + 4) != NULL) {
-			// strtok(strstr(response, "\r\n\r\n"), "\r\n");
-			// printf("RESPONSE: ---\n%s\n---\n", response);
 			// Remove double line at end
-			//printf("strstr end\n");
-			//printf("len buf: %ld\n", strlen(buffer));
-			//printf("len resp: %ld\n", strlen(response));
 			char *end;
-			if ((end = strstr(response, "\n\n")) != NULL) {
-				*end = '\0';
-			}
-			//printf("strstr end2\n");
-			//printf("RESPONSE: ---\n%s\n---\n", response);
+			if ((end = strstr(response, "\n\n")) != NULL) *end = '\0';
 		} else {
 			response = "There was a problem uploading your file";
+			char tmp[BUFFER_SIZE];
+			sprintf(tmp, "run_php: Failed to parse response from php server:\n%s", buffer);
+			write_log(tmp);
 		}
 		// Send back page with added popup with response message
-		//printf("SEND_PAGE\n");
 		if (send_page(resource, working_dir, file_stats, s, true, strdup(response)) != 0) {
-			perror("list_directory");
+			perror("send_page");
+			char tmp[BUFFER_SIZE];
+			sprintf(tmp, "run_php: send_page: resource: %s, working_dir: %s, response: %s", resource, working_dir, response);
+			write_log(tmp);
 		}
-		//printf("SEND_PAGE_DONE\n");
 	}
 	return 0;
 }
 
+// http://man7.org/linux/man-pages/man3/getaddrinfo.3.html
 int connect_php(int *sfd) {
 	struct addrinfo hints;
 	struct addrinfo *result, *rp;
@@ -637,6 +582,9 @@ int connect_php(int *sfd) {
 	if (s != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
 		perror("Could not connect to php server");
+		char tmp[200];
+		sprintf(tmp, "connect_php: Could not connect to php server (s = %d)", s);
+		write_log(tmp);
 		return -1;
 	}
 
@@ -659,6 +607,7 @@ int connect_php(int *sfd) {
 
 	if (rp == NULL) {               /* No address succeeded */
 		perror("Could not connect to php server");
+		write_log("connect_php: Could not connect to php server (rp = NULL)");
 		return -1;
 	}
 
@@ -679,36 +628,35 @@ int parse_http_headers(char *buffer, char **host, char **request, char **resourc
 		*clen = strtol(cont_len, &endp, 10);
 		if (*endp != '\0') {
 			fprintf(stderr, "%s is not a number\n", cont_len);
+			char tmp[200];
+			sprintf(tmp, "parse_http_headers: Content-Length (\"%s\") is not a number", cont_len);
+			write_log(tmp);
 			return -1;
-		} else {
-			//printf("Content-Length: %d\n", *clen);
 		}
 	} else {
-		//printf("No Content-Length\n");
 		*clen = -1;
 	}
 	
 	host_tmp = strstr(buffer, "Host: "); // Get pointer to start of host line
 	host_tmp = strtok(host_tmp, "\r\n"); // Remove everything after the host line (not needed)
 	host_tmp += 6; // Remove "Host: " to get just host:port, e.g. localhost:8080
-	//printf("Host: %s\n", *host_tmp);
 	if (*host != NULL) free(*host);
 	*host = strdup(host_tmp);
 	
 	request_tmp = strtok(buffer, " "); // Get everything before the first space (i.e. "GET", "POST" etc)
-	//printf("Request: %s\n", *request_tmp);
 	if (*request != NULL) free(*request);
 	*request = strdup(request_tmp);
 		
 	resource_tmp = strtok(NULL, " "); // Get second word in request, e.g. / or /test.txt
-	//printf("Resource: %s\n", *resource_tmp);
 	if (*resource != NULL) free(*resource);
 	*resource = strdup(resource_tmp);
-	
 	return 0;
 }
 
-int service_client_socket(const int s, const char * const tag) {
+int service_client_socket(const int s, const char * const tag, FILE *fp, pthread_mutex_t mut) {
+	log_fp = fp;
+	log_mut = mut;
+
 	int sfd = -1; // Connection info for php server
 	char buffer[BUFFER_SIZE];
 	memset(buffer, '\0', BUFFER_SIZE);
@@ -746,7 +694,6 @@ int service_client_socket(const int s, const char * const tag) {
 
 	// Repeatedly read data from the client
 	while ((bytes = read(s, buffer, BUFFER_SIZE - 1)) > 0) {
-		// printf("===== BUFFER =====\n%s\n=================\n", buffer);
 		// Create a copy of the buffer for editing
 		char *buffercopy = malloc(sizeof(buffer));
 		memcpy(buffercopy, buffer, BUFFER_SIZE);
@@ -756,61 +703,46 @@ int service_client_socket(const int s, const char * const tag) {
 			// Parse HTTP request:
 			if (parse_http_headers(buffercopy, &host, &request, &resource, &bytes_total) != 0) {
 				perror("parse_http_headers");
-				//close(s);
+				char tmp[BUFFER_SIZE * 2];
+				sprintf(tmp, "parse_http_headers: host: %s, request: %s, resource: %s, bytes_total: %d\n\
+					Buffer:\n==========\n%s\n==========", host, request, resource, bytes_total, buffer);
+				write_log(tmp);
+				close(s);
 				return -1;
 			}
-			//printf("Host: %s, Request: %s, Resource: %s, Content-Length: %d\n", host, request, resource, bytes_total);
-			
 			bytes_read = 0;
-			//bytes_read += strlen(strstr(buffer, "\r\n\r\n"));
 			bytes_read += bytes - (strstr(buffer, "\r\n\r\n") - buffer); // Bytes - distance from start of buffer to end of headers
-			//printf("BYTES_READ: %d, BYTES: %ld, HEADERS: %ld\n", bytes_read, bytes, (strstr(buffer, "\r\n\r\n") - buffer));
-			//printf("@@@@@\n%s@@@@@\n%ld\n", strstr(buffer, "\r\n\r\n"), strlen(strstr(buffer, "\r\n\r\n")));
-			
-			if (bytes_total != -1 && bytes_read - 4 > bytes_total) {
-				printf("===== BUFFER =====\n%s\n=================\n", buffer);
-				fprintf(stderr, "Incorrect Content-Length:\nbytes: %ld, bytes_read: %d, bytes_total: %d\n", bytes, bytes_read, bytes_total);
-				fprintf(stderr, "CLOSING CONNECTION\n");
-				//close(s);
-				//return -1;
-			}
 		} else {
 			first_read = false;
 			bytes_read += bytes;
 		}
-		//printf("bytes_read: %d, bytes_total: %d, bytes: %ld\n", bytes_read, bytes_total, bytes);
 		// Using cwd and the requested resource, find the path to the resource
 		char *working_dir = malloc(strlen(cwd) + strlen(resource) + 1);
 		strcpy(working_dir, cwd);
 		strcat(working_dir, resource);
 
-		//printf("resource: %ld, working_dir: %ld\n", strlen(resource), strlen(working_dir));
-
-		//printf("RESOURCE: %s\n", resource);
-		//printf("WORKING_DIR: %s\n", working_dir);
-
 		// If the request is a file transfer
-		// printf("%s\n", resource);
-		
 		if (!uploading && strcmp(request, "GET") == 0) { // GET request
 			if (stat(working_dir, &file_stats) == 0 && !(file_stats.st_mode & S_IXUSR)) { // Do not show executable files
 				// Call read_file to copy the file data into file_buffer
 				if (read_file(working_dir, &length, &file_buffer) == -1) {
 					// 500 Internal Server Error
 					perror("Failed to read file");
+					char tmp[200];
+					sprintf(tmp, "read_file: Failed to read file: working_dir: %s", working_dir);
+					write_log(tmp);
 					if (send_response(s, error500, error500http) == -1) {
 						perror("Failed to send fail response");
+						write_log("send_response: Failed to send error500 response (read_file)");
 					}
 				} else {
 					// Send the file
 					send_file(s, status200, file_buffer, length);
-					free(file_buffer);
 				}
 			} else { // Not a file, so must be a directory
 				send_page(resource, working_dir, file_stats, s, false, "");
 			}
 		} else if (uploading || strcmp(request, "POST") == 0) { // POST request
-			// printf("bytes_read: %d, bytes_total: %d\n", bytes_read, bytes_total);
 			if (bytes_read < bytes_total) {
 				uploading = true;
 			} else {
@@ -822,7 +754,8 @@ int service_client_socket(const int s, const char * const tag) {
 			fprintf(stderr, "Invalid request: %s", request);
 			if (send_response(s, error501, error501http) == -1) {
 				perror("send_response err501");
-				//close(s);
+				write_log("send_response: Failed to send error501 response");
+				close(s);
 				return -1;
 			}
 		}
