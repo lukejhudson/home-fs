@@ -1,2 +1,6 @@
 [06-Aug-2018 23:22:47 Europe/London] PHP Warning:  mkdir(): File exists in /home/luke/projects/home-fs/src/mkdir.php on line 6
 [06-Aug-2018 23:38:22 Europe/London] PHP Warning:  mkdir(): File exists in /home/luke/projects/home-fs/src/mkdir.php on line 6
+[07-Aug-2018 14:45:20 Europe/London] PHP Warning:  mkdir(): File exists in /home/luke/projects/home-fs/src/mkdir.php on line 6
+[07-Aug-2018 15:16:25 Europe/London] PHP Warning:  mkdir(): File exists in /home/luke/projects/home-fs/src/mkdir.php on line 6
+[07-Aug-2018 15:16:48 Europe/London] PHP Warning:  unlink(../uploads/project1.jar): No such file or directory in /home/luke/projects/home-fs/src/delete.php on line 24
+[07-Aug-2018 15:17:01 Europe/London] PHP Warning:  unlink(../uploads/src-20180408T063215Z-001.zip): No such file or directory in /home/luke/projects/home-fs/src/delete.php on line 24
