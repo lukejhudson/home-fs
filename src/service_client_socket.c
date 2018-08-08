@@ -222,7 +222,6 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 				&& strcmp(entry->d_name, "..") != 0) { // Not ".." either
 			num_dirs++;
 		} else if (entry->d_type == DT_REG // File
-				&& !(file_stats.st_mode & S_IXUSR) // Not executable
 				&& (entry->d_name[0] != '.')) { // Doesn't start with "."
 			num_files++;
 		}
@@ -399,7 +398,6 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 			dirs[count_dirs] = strdup(httpline);
 			count_dirs++;
 		} else if (entry->d_type == DT_REG // File
-				&& !(file_stats.st_mode & S_IXUSR) // Not executable
 				&& (entry->d_name[0] != '.')) { // Doesn't start with "."
 			// Create delete button
 			sprintf(tmp, "<td><form action=\"%s/delete.php?file=%s&path=%s\" method=\"post\" onclick=\"return confirm('Are you sure you want to delete %s?');\">\
@@ -761,7 +759,6 @@ int service_client_socket(const int s, const char * const tag, FILE *fp, pthread
 	// File info
 	char *file_buffer; // Array to store the file contents
 	long length; // length of the file
-	// File info - Find if file is executable
 	struct stat file_stats; // Struct containing stats on the requested resource
 	
 	char cwd[BUFFER_SIZE]; // Current working directory - Full path to where the server is being run
@@ -817,7 +814,7 @@ int service_client_socket(const int s, const char * const tag, FILE *fp, pthread
 
 		// If the request is a file transfer
 		if (!uploading && strcmp(request, "GET") == 0) { // GET request
-			if (stat(working_dir, &file_stats) == 0 && !(file_stats.st_mode & S_IXUSR)) { // Do not show executable files
+			if (stat(working_dir, &file_stats) == 0 && S_ISREG(file_stats.st_mode)) { // Do not show executable files
 				// Call read_file to copy the file contents into file_buffer
 				if (read_file(working_dir, &length, &file_buffer) == -1) {
 					// 500 Internal Server Error

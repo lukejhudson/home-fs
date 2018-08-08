@@ -176,3 +176,17 @@
 [15:16:59  2018-8-7] send_page: list_directory failed: resource: /favicon.ico, update: false, response: 
 [15:17:5  2018-8-7] list_directory: Cannot find file/directory1: resource: /favicon.ico, resource_dir: ../favicon.ico
 [15:17:5  2018-8-7] send_page: list_directory failed: resource: /favicon.ico, update: false, response: 
+[0:6:19  2018-8-9] read_file: malloc failed
+[0:6:19  2018-8-9] read_file: Failed to read file: working_dir: /home/luke/projects/home-fs/
+[0:6:19  2018-8-9] list_directory: Cannot find file/directory1: resource: /favicon.ico, resource_dir: ../favicon.ico
+[0:6:19  2018-8-9] send_page: list_directory failed: resource: /favicon.ico, update: false, response: 
+[0:6:26  2018-8-9] read_file: malloc failed
+[0:6:26  2018-8-9] read_file: Failed to read file: working_dir: /home/luke/projects/home-fs/
+[0:6:30  2018-8-9] read_file: malloc failed
+[0:6:30  2018-8-9] read_file: Failed to read file: working_dir: /home/luke/projects/home-fs/
+[0:6:36  2018-8-9] read_file: malloc failed
+[0:6:36  2018-8-9] read_file: Failed to read file: working_dir: /home/luke/projects/home-fs/
+[0:6:56  2018-8-9] read_file: malloc failed
+[0:6:56  2018-8-9] read_file: Failed to read file: working_dir: /home/luke/projects/home-fs/
+[0:16:24  2018-8-9] read_file: malloc failed
+[0:16:24  2018-8-9] read_file: Failed to read file: working_dir: /home/luke/projects/home-fs/
