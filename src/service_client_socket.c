@@ -583,9 +583,9 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 		strcpy(tmp, msg);
 		strtok(msg, "/");
 		sprintf(tmp, "%s/%s", msg, ptr);
-		strcpy(msg, tmp);
 		
-		len -= strlen(path) - 1;
+		len -= (strlen(path) - 1);
+		memcpy(msg, tmp, len);
 	}
 	// Pass the msg onto the php server
 	if (write(sfd, msg, len) != len) {
@@ -729,6 +729,7 @@ int parse_http_headers(char *buffer, char **host, char **request, char **resourc
 	resource_tmp = strtok(NULL, " "); // Get second word in request, e.g. / or /test.txt
 	if (*resource != NULL) free(*resource);
 	*resource = strdup(resource_tmp); // Copy into given resource array
+	printf("resource: %s\n", *resource);
 	return 0;
 }
 
@@ -814,7 +815,7 @@ int service_client_socket(const int s, const char * const tag, FILE *fp, pthread
 
 		// If the request is a file transfer
 		if (!uploading && strcmp(request, "GET") == 0) { // GET request
-			if (stat(working_dir, &file_stats) == 0 && S_ISREG(file_stats.st_mode)) { // Do not show executable files
+			if (stat(working_dir, &file_stats) == 0 && S_ISREG(file_stats.st_mode)) { // Only show files
 				// Call read_file to copy the file contents into file_buffer
 				if (read_file(working_dir, &length, &file_buffer) == -1) {
 					// 500 Internal Server Error
