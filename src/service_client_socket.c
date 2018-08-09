@@ -15,6 +15,7 @@
 #include <pthread.h>
 
 #include <time.h>
+#include <signal.h>
 
 #define BUFFER_SIZE 2048
 // Status codes for messages which are commonly sent
@@ -729,8 +730,15 @@ int parse_http_headers(char *buffer, char **host, char **request, char **resourc
 	resource_tmp = strtok(NULL, " "); // Get second word in request, e.g. / or /test.txt
 	if (*resource != NULL) free(*resource);
 	*resource = strdup(resource_tmp); // Copy into given resource array
-	printf("resource: %s\n", *resource);
 	return 0;
+}
+
+/* Handling of the SIGPIPE signal so that the server is not shut down when a connection is closed unexpectedly. */
+void t_sig_handler(int signo) {
+	if (signo == SIGPIPE) {
+		perror("SIGPIPE received");
+	}
+	write_log("Closing connection: SIGPIPE received");
 }
 
 /*
@@ -742,6 +750,11 @@ fp  = Pointer to the log file
 mut = Mutex to lock the log file while editing
 */
 int service_client_socket(const int s, const char * const tag, FILE *fp, pthread_mutex_t mut) {
+	// Handle SIGPIPE signal with t_sig_handler function above
+	if (signal(SIGPIPE, t_sig_handler) == SIG_ERR) {
+		perror("catching SIGPIPE");
+		exit(1);
+	}
 	// Store the file pointer and mutex globally so they don't need to be passed around
 	log_fp = fp;
 	log_mut = mut;
