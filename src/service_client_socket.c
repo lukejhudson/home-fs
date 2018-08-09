@@ -582,9 +582,14 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 		char tmp[BUFFER_SIZE];
 		strcpy(tmp, msg);
 		strtok(msg, "/");
-		sprintf(tmp, "%s/%s", msg, ptr);
+		//sprintf(tmp, "%s/%s", msg, ptr);
 		
 		len -= (strlen(path) - 1);
+		
+		// sprintf --> memcpy?
+		sprintf(tmp, "%s/", msg);
+		memcpy(tmp + strlen(tmp), ptr, len - strlen(msg));
+		
 		memcpy(msg, tmp, len);
 	}
 	// Pass the msg onto the php server
