@@ -95,6 +95,10 @@ Send an HTTP message, consisting of header header and body body to port s.
 int send_response(const int s, char *header, char *body) {
 	// Allocate memory
 	char *send = malloc(strlen(header) + 20 + strlen(body));
+	if (send == NULL) {
+		perror("malloc");
+		write_log("send_response: malloc failed");
+	}
 	int len = strlen(body);
 	// Add the header and body to the string to be sent
 	sprintf(send, header, len);
@@ -119,6 +123,10 @@ Send a file over HTTP with a header header and file file of length length to por
 int send_file(const int s, char *header, char *file, long length) {
 	// Allocate memory
 	char *send = malloc(strlen(header) + 20);
+	if (send == NULL) {
+		perror("malloc");
+		write_log("send_file: malloc failed");
+	}
 	// Add header to string to be sent
 	sprintf(send, header, length);
 	// Send the header
@@ -237,6 +245,10 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 	char *send_dir = malloc(BUFFER_SIZE + 512 * num_dirs); // Table of directories; Create Directory button
 	char *send_files = malloc(BUFFER_SIZE + 512 * num_files); // Tables of files
 	char *upload_files = malloc(BUFFER_SIZE); // Upload Here button or redirection to /uploads
+	if (dirs == NULL || files == NULL || css == NULL || send_dir == NULL || send_files == NULL || upload_files == NULL) {
+		perror("malloc");
+		write_log("list_directory: malloc failed");
+	}
 	// Format the beginning of the HTML
 	strcpy(css, "<style>\
 			table {\
@@ -300,6 +312,10 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 	
 	// Create the path to the current directory next to the Directory heading
 	char *resource_copy = strdup(resource);
+	if (resource_copy == NULL) {
+		perror("strdup");
+		write_log("list_directory: strdup failed");
+	}
 	char path_to_dir[BUFFER_SIZE];
 	char *token; // Used in strtok to get each directory in the path
 	char path[200];
@@ -397,6 +413,10 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 				file_name, entry->d_name, uploads ? tmp : "");
 			// Store the row for future sorting
 			dirs[count_dirs] = strdup(httpline);
+			if (dirs[count_dirs] == NULL) {
+				perror("strdup");
+				write_log("list_directory: strdup failed");
+			}
 			count_dirs++;
 		} else if (entry->d_type == DT_REG // File
 				&& (entry->d_name[0] != '.')) { // Doesn't start with "."
@@ -409,6 +429,10 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 				file_name, entry->d_name, file_stats.st_size, uploads ? tmp : "");
 			// Store the row for future sorting
 			files[count_files] = strdup(httpline);
+			if (files[count_files] == NULL) {
+				perror("strdup");
+				write_log("list_directory: strdup failed");
+			}
 			count_files++;
 		}
 	}
@@ -468,6 +492,10 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 	}
 	// Concatenate entire page into one string, then send the page
 	char *send = malloc(strlen(css) + strlen(send_dir) + strlen(send_files) + strlen(upload_files) + 1);
+	if (send == NULL) {
+		perror("malloc");
+		write_log("list_directory: malloc failed");
+	}
 	strcpy(send, css);
 	strcat(send, send_dir);
 	strcat(send, send_files);
@@ -502,6 +530,10 @@ int send_page(char *resource, char *working_dir, struct stat file_stats, const i
 	// Get correct path to request directory
 	// (Since code is running in /src we need to go up a directory)
 	char *resource_dir = malloc(strlen(working_dir) + 2);
+	if (resource_dir == NULL) {
+		perror("malloc");
+		write_log("send_page: malloc failed");
+	}
 	strcpy(resource_dir, "..");
 	strcat(resource_dir, resource);
 	// Pass arguments to list_directory
@@ -621,8 +653,13 @@ int run_php(char *msg, int sfd, size_t bytes, int uploading, const int s, char *
 			sprintf(tmp, "run_php: Failed to parse response from php server:\n%s", buffer);
 			write_log(tmp);
 		}
+		char *resp = strdup(response);
+		if (resp == NULL) {
+			perror("strdup");
+			write_log("run_php: strdup failed");
+		}
 		// Send back page with added popup with response message
-		if (send_page(resource, working_dir, file_stats, s, true, strdup(response)) != 0) {
+		if (send_page(resource, working_dir, file_stats, s, true, resp) != 0) {
 			perror("send_page");
 			char tmp[BUFFER_SIZE];
 			sprintf(tmp, "run_php: send_page: resource: %s, working_dir: %s, response: %s", resource, working_dir, response);
@@ -727,14 +764,26 @@ int parse_http_headers(char *buffer, char **host, char **request, char **resourc
 	host_tmp += 6; // Remove "Host: " to get just host:port, e.g. localhost:8080
 	if (*host != NULL) free(*host);
 	*host = strdup(host_tmp); // Copy into given host array
+	if (host == NULL) {
+		perror("strdup");
+		write_log("parse_http_headers: strdup failed");
+	}
 	
 	request_tmp = strtok(buffer, " "); // Get everything before the first space (i.e. "GET", "POST" etc)
 	if (*request != NULL) free(*request);
 	*request = strdup(request_tmp); // Copy into given request array
+	if (request == NULL) {
+		perror("strdup");
+		write_log("parse_http_headers: strdup failed");
+	}
 		
 	resource_tmp = strtok(NULL, " "); // Get second word in request, e.g. / or /test.txt
 	if (*resource != NULL) free(*resource);
 	*resource = strdup(resource_tmp); // Copy into given resource array
+	if (resource == NULL) {
+		perror("strdup");
+		write_log("parse_http_headers: strdup failed");
+	}
 	return 0;
 }
 
@@ -803,6 +852,10 @@ int service_client_socket(const int s, const char * const tag, FILE *fp, pthread
 	while ((bytes = read(s, buffer, BUFFER_SIZE - 1)) > 0) {
 		// Create a copy of the buffer for editing
 		char *buffercopy = malloc(sizeof(buffer));
+		if (buffercopy == NULL) {
+			perror("malloc");
+			write_log("service_client_socket: malloc failed");
+		}
 		memcpy(buffercopy, buffer, BUFFER_SIZE);
 		// If this is the first part of the request, connect to the php server and parse the headers
 		if (!uploading) {
@@ -828,6 +881,10 @@ int service_client_socket(const int s, const char * const tag, FILE *fp, pthread
 		}
 		// Using cwd and the requested resource, find the full path to the resource
 		char *working_dir = malloc(strlen(cwd) + strlen(resource) + 1);
+		if (working_dir == NULL) {
+			perror("malloc");
+			write_log("service_client_socket: malloc failed");
+		}
 		strcpy(working_dir, cwd);
 		strcat(working_dir, resource);
 
