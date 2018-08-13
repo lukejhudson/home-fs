@@ -181,7 +181,7 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 			resource, resource_dir);
 		write_log(tmp);
 		if (send_response(s, error404, error404http) != 0) {
-			perror("send_response error500");
+			perror("send_response error404");
 			write_log("list_directory: send_response: Failed to send error404 response");
 			return -1;
 		}
@@ -190,10 +190,10 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 		return -1;
 	}
 	
-	char httpline[300]; // A single entry in the files/directories table
+	char httpline[BUFFER_SIZE]; // A single entry in the files/directories table
 	char file_name[200]; // Name of the file/dir, e.g. "/src/server.log"
 	char file_path[202]; // Path to the file/dir (".." prepended), e.g. "../src/server.log"
-	char tmp[200]; // General purpose char array for temp strings
+	char tmp[BUFFER_SIZE]; // General purpose char array for temp strings
 	int num_files = 0; // Number of files found in the directory
 	int num_dirs = 0; // Number of directories found in the directory
 	
@@ -349,7 +349,7 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 			resource, resource_dir);
 		write_log(tmp);
 		if (send_response(s, error404, error404http) != 0) {
-			perror("send_response error500");
+			perror("send_response error404");
 			write_log("list_directory: send_response: Failed to send error404 response");
 			return -1;
 		}

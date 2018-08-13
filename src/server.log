@@ -60,3 +60,10 @@
 
 [17:29:33  2018-8-9] run_php: Failed to parse response from php server:
 
+[23:24:59  2018-8-9] list_directory: Cannot find file/directory1: resource: /favicon.ico, resource_dir: ../favicon.ico
+[23:24:59  2018-8-9] send_page: list_directory failed: resource: /favicon.ico, update: false, response: 
+[14:40:19  2018-8-13] connect_php: Could not connect to php server (rp = NULL)
+[14:40:24  2018-8-13] connect_php: Could not connect to php server (rp = NULL)
+[14:40:24  2018-8-13] list_directory: Cannot find file/directory1: resource: /favicon.ico, resource_dir: ../favicon.ico
+[14:40:24  2018-8-13] send_page: list_directory failed: resource: /favicon.ico, update: false, response: 
+[14:40:26  2018-8-13] connect_php: Could not connect to php server (rp = NULL)
