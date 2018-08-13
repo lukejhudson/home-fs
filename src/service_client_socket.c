@@ -424,9 +424,16 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 			sprintf(tmp, "<td><form action=\"%s/delete.php?file=%s&path=%s\" method=\"post\" onclick=\"return confirm('Are you sure you want to delete %s?');\">\
 	  			<input type=\"submit\" class=\"delete\" value=\"&#160;&#160;&#160;&times;&#160;&#160;&#160;\">\
 				</form></td>", resource, entry->d_name, resource, entry->d_name);
+			// Calculate size in KB (rounded up)
+			int size = ((file_stats.st_size - 1) / 1024) + 1;
+			char size_format[] = "KB";
+			if (size >= 10240) { // Convert to MB
+				size = ((size - 1) / 1024) + 1;
+				strcpy(size_format, "MB");
+			}
 			// Format row of the table
-			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a></td><td class=\"size\">%ld bytes</td>%s</tr>", 
-				file_name, entry->d_name, file_stats.st_size, uploads ? tmp : "");
+			sprintf(httpline, "<tr><td><a href=\"%s\">%s</a></td><td class=\"size\">%d %s</td>%s</tr>", 
+				file_name, entry->d_name, size, size_format, uploads ? tmp : "");
 			// Store the row for future sorting
 			files[count_files] = strdup(httpline);
 			if (files[count_files] == NULL) {
