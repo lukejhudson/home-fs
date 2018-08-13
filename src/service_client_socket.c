@@ -427,7 +427,7 @@ int list_directory(char *resource, char *resource_dir, struct stat file_stats, c
 			// Calculate size in KB (rounded up)
 			int size = ((file_stats.st_size - 1) / 1024) + 1;
 			char size_format[] = "KB";
-			if (size >= 10240) { // Convert to MB
+			if (size >= 10000) { // Convert to MB
 				size = ((size - 1) / 1024) + 1;
 				strcpy(size_format, "MB");
 			}
