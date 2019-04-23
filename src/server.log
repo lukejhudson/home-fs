@@ -67,3 +67,9 @@
 [14:40:24  2018-8-13] list_directory: Cannot find file/directory1: resource: /favicon.ico, resource_dir: ../favicon.ico
 [14:40:24  2018-8-13] send_page: list_directory failed: resource: /favicon.ico, update: false, response: 
 [14:40:26  2018-8-13] connect_php: Could not connect to php server (rp = NULL)
+[15:1:33  2019-4-23] list_directory: Cannot find file/directory1: resource: /favicon.ico, resource_dir: ../favicon.ico
+[15:1:33  2019-4-23] send_page: list_directory failed: resource: /favicon.ico, update: false, response: 
+[15:1:46  2019-4-23] list_directory: Cannot find file/directory1: resource: /uploads, resource_dir: ../uploads
+[15:1:46  2019-4-23] send_page: list_directory failed: resource: /uploads, update: false, response: 
+[15:17:27  2019-4-23] list_directory: Cannot find file/directory1: resource: /favicon.ico, resource_dir: ../favicon.ico
+[15:17:27  2019-4-23] send_page: list_directory failed: resource: /favicon.ico, update: false, response: 
