@@ -1,4 +1,3 @@
-# home-fs
 # home-fs - A Basic, Lightweight File Server #
 ## About ##
 A lightweight file server built in C from the ground up, intended for use on a Raspberry Pi. This project is based on an assignment from my third year of university. Browse files and directories on the server, or upload your own files in the 'uploads' folder.
